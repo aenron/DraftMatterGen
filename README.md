@@ -107,6 +107,17 @@ docker compose up --build -d
 
 镜像默认使用中国标准时间 `Asia/Shanghai`。修改 `TZ` 或时区相关配置后需要重新构建镜像，而不是只重启旧容器。
 
+### 加速镜像构建
+
+Dockerfile 使用 BuildKit 分别缓存 APT 软件包和 pip 下载文件，Compose 还会把完整构建缓存导出到项目的 `.docker-cache` 目录。日常构建直接执行：
+
+```bash
+docker compose build
+docker compose up -d
+```
+
+不要在日常构建中使用 `--no-cache`，否则会主动放弃所有缓存。只有需要强制验证全新构建时才使用它。业务代码位于依赖安装层之后，因此仅修改 `app/` 通常只会重建最后几层，不会重新安装 LibreOffice 和 Python 依赖。
+
 镜像以非 root 用户运行，根文件系统只读，临时文档写入容器的 `/tmp` 内存文件系统。原始文件在单次请求完成后删除。
 
 ## 测试

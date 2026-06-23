@@ -1,25 +1,29 @@
+# syntax=docker/dockerfile:1.7
+
 FROM python:3.12-slim
 
 ARG TZ=Asia/Shanghai
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1 \
     TZ=${TZ}
 
-RUN apt-get update \
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    rm -f /etc/apt/apt.conf.d/docker-clean \
+    && apt-get update \
     && apt-get install -y --no-install-recommends \
        tzdata \
        libreoffice-writer \
        fonts-noto-cjk \
     && ln -snf /usr/share/zoneinfo/${TZ} /etc/localtime \
-    && echo ${TZ} > /etc/timezone \
-    && rm -rf /var/lib/apt/lists/*
+    && echo ${TZ} > /etc/timezone
 
 WORKDIR /app
 
 COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install -r requirements.txt
 
 COPY app ./app
 

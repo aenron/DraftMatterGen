@@ -1,6 +1,11 @@
 services:
   draft-reason-service:
-    build: .
+    build:
+      context: .
+      cache_from:
+        - type=local,src=.docker-cache
+      cache_to:
+        - type=local,dest=.docker-cache,mode=max
     image: draft-reason-service:latest
     env_file:
       - .env

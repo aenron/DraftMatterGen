@@ -3,6 +3,6 @@
 .venv
 __pycache__
 .pytest_cache
+.docker-cache
 tests
 参考文件
-
