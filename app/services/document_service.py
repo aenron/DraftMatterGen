@@ -1,0 +1,110 @@
+import asyncio
+import re
+import shutil
+import tempfile
+import zipfile
+from pathlib import Path
+
+from fastapi import UploadFile
+from loguru import logger
+
+from app.core.config import Settings
+from app.core.errors import ServiceError
+from app.parsers import DocParser, DocxParser, TxtParser
+
+
+OLE_SIGNATURE = bytes.fromhex("D0CF11E0A1B11AE1")
+
+
+class DocumentService:
+    def __init__(self, settings: Settings) -> None:
+        self.settings = settings
+        docx_parser = DocxParser()
+        self.parsers = {
+            "docx": docx_parser,
+            "doc": DocParser(settings, docx_parser),
+            "txt": TxtParser(),
+        }
+
+    async def extract_upload(self, upload: UploadFile) -> tuple[str, str]:
+        filename = Path(upload.filename or "").name
+        suffix = Path(filename).suffix.lower().lstrip(".")
+        logger.info("document_received filename={} extension={}", filename or "unknown", suffix or "none")
+        if not filename or not suffix:
+            await upload.close()
+            raise ServiceError(400, "INVALID_FILENAME", "文件名或扩展名无效")
+        if suffix not in self.settings.allowed_extension_set or suffix not in self.parsers:
+            await upload.close()
+            raise ServiceError(415, "UNSUPPORTED_FILE_TYPE", f"不支持的文件类型: .{suffix}")
+
+        self.settings.temp_dir.mkdir(parents=True, exist_ok=True)
+        work_dir = Path(tempfile.mkdtemp(prefix="job-", dir=self.settings.temp_dir))
+        safe_stem = re.sub(r"[^A-Za-z0-9_-]", "_", Path(filename).stem)[:80] or "input"
+        target = work_dir / f"{safe_stem}.{suffix}"
+        try:
+            size_bytes = await self._save_upload(upload, target)
+            logger.info(
+                "document_saved filename={} extension={} size_bytes={}",
+                filename,
+                suffix,
+                size_bytes,
+            )
+            await asyncio.to_thread(self._validate_signature, target, suffix)
+            logger.debug("document_signature_valid filename={} extension={}", filename, suffix)
+            text = await self.parsers[suffix].extract(target)
+            text = self._clean_text(text)
+            if not text:
+                raise ServiceError(422, "NO_READABLE_TEXT", "文档中未提取到可读文字")
+            logger.info(
+                "document_extracted filename={} extension={} text_chars={}",
+                filename,
+                suffix,
+                len(text),
+            )
+            return text, filename
+        finally:
+            await upload.close()
+            await asyncio.to_thread(shutil.rmtree, work_dir, True)
+            logger.debug("document_temp_files_removed filename={}", filename)
+
+    async def _save_upload(self, upload: UploadFile, target: Path) -> int:
+        total = 0
+        with target.open("wb") as output:
+            while chunk := await upload.read(1024 * 1024):
+                total += len(chunk)
+                if total > self.settings.upload_max_bytes:
+                    raise ServiceError(
+                        413,
+                        "FILE_TOO_LARGE",
+                        f"文件不能超过 {self.settings.upload_max_mb} MB",
+                    )
+                output.write(chunk)
+        if total == 0:
+            raise ServiceError(400, "EMPTY_FILE", "上传文件为空")
+        return total
+
+    @staticmethod
+    def _validate_signature(path: Path, suffix: str) -> None:
+        header = path.read_bytes()[:16]
+        if suffix == "doc" and not header.startswith(OLE_SIGNATURE):
+            raise ServiceError(400, "FILE_SIGNATURE_MISMATCH", "文件内容不是有效的 DOC 格式")
+        if suffix == "docx":
+            if not zipfile.is_zipfile(path):
+                raise ServiceError(400, "FILE_SIGNATURE_MISMATCH", "文件内容不是有效的 DOCX 格式")
+            try:
+                with zipfile.ZipFile(path) as archive:
+                    names = set(archive.namelist())
+                    if "[Content_Types].xml" not in names or "word/document.xml" not in names:
+                        raise ServiceError(
+                            400, "FILE_SIGNATURE_MISMATCH", "文件内容不是有效的 DOCX 格式"
+                        )
+            except zipfile.BadZipFile as exc:
+                raise ServiceError(400, "FILE_SIGNATURE_MISMATCH", "DOCX 文件已损坏") from exc
+        if suffix == "txt" and b"\x00" in header:
+            raise ServiceError(400, "FILE_SIGNATURE_MISMATCH", "TXT 文件包含二进制内容")
+
+    @staticmethod
+    def _clean_text(text: str) -> str:
+        text = text.replace("\x00", "").replace("\r\n", "\n").replace("\r", "\n")
+        lines = [re.sub(r"[ \t]+", " ", line).strip() for line in text.splitlines()]
+        return "\n".join(line for line in lines if line).strip()

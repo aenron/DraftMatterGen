@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.pytest-tmp/
+.coverage
+.env
+.venv/
+htmlcov/
+dist/
+build/
+
+参考文件/
