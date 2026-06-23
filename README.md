@@ -40,6 +40,7 @@ LLM_MODEL=your-model
 ```dotenv
 LOG_LEVEL=INFO
 LOG_JSON=false
+TZ=Asia/Shanghai
 ```
 
 生产环境可设置 `LOG_JSON=true` 输出精简 JSON 日志，方便日志平台采集。默认 `INFO` 级别下每个成功请求只输出一条业务汇总日志；排查文档解析或模型调用细节时临时设置 `LOG_LEVEL=DEBUG`。
@@ -103,6 +104,8 @@ GET /health/ready
 copy .env.example .env
 docker compose up --build -d
 ```
+
+镜像默认使用中国标准时间 `Asia/Shanghai`。修改 `TZ` 或时区相关配置后需要重新构建镜像，而不是只重启旧容器。
 
 镜像以非 root 用户运行，根文件系统只读，临时文档写入容器的 `/tmp` 内存文件系统。原始文件在单次请求完成后删除。
 

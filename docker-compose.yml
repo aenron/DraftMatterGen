@@ -4,6 +4,8 @@ services:
     image: draft-reason-service:latest
     env_file:
       - .env
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
     ports:
       - "8002:8000"
     read_only: true
@@ -12,4 +14,3 @@ services:
     security_opt:
       - no-new-privileges:true
     restart: unless-stopped
-
