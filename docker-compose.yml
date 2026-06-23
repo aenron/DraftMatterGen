@@ -11,6 +11,8 @@ services:
       - .env
     environment:
       TZ: ${TZ:-Asia/Shanghai}
+    networks:
+      - draft-reason
     ports:
       - "8002:8000"
     read_only: true
@@ -19,3 +21,7 @@ services:
     security_opt:
       - no-new-privileges:true
     restart: unless-stopped
+    
+networks:
+  draft-reason:
+    external: true
