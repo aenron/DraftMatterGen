@@ -26,6 +26,19 @@ def test_parse_markdown_json_response() -> None:
     assert LLMClient._parse_response(payload) == "办理相关事项。"
 
 
+def test_parse_json_with_reasoning_and_explanation() -> None:
+    payload = {
+        "choices": [
+            {
+                "message": {
+                    "content": '<think>分析过程</think>结果如下：\n```json\n{"draft_reason":"办理相关事项。"}\n```\n请查收。'
+                }
+            }
+        ]
+    }
+    assert LLMClient._parse_response(payload) == "办理相关事项。"
+
+
 def test_reject_missing_reason() -> None:
     with pytest.raises(ValueError):
         LLMClient._parse_response({"choices": [{"message": {"content": "{}"}}]})

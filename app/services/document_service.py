@@ -29,7 +29,7 @@ class DocumentService:
     async def extract_upload(self, upload: UploadFile) -> tuple[str, str]:
         filename = Path(upload.filename or "").name
         suffix = Path(filename).suffix.lower().lstrip(".")
-        logger.info("document_received filename={} extension={}", filename or "unknown", suffix or "none")
+        logger.debug("document_received filename={} extension={}", filename or "unknown", suffix or "none")
         if not filename or not suffix:
             await upload.close()
             raise ServiceError(400, "INVALID_FILENAME", "文件名或扩展名无效")
@@ -43,7 +43,7 @@ class DocumentService:
         target = work_dir / f"{safe_stem}.{suffix}"
         try:
             size_bytes = await self._save_upload(upload, target)
-            logger.info(
+            logger.debug(
                 "document_saved filename={} extension={} size_bytes={}",
                 filename,
                 suffix,
@@ -56,9 +56,10 @@ class DocumentService:
             if not text:
                 raise ServiceError(422, "NO_READABLE_TEXT", "文档中未提取到可读文字")
             logger.info(
-                "document_extracted filename={} extension={} text_chars={}",
+                "📥 文件接收完成 | 文件名={} | 类型={} | 大小={} | 文本长度={}字符",
                 filename,
                 suffix,
+                self._format_size(size_bytes),
                 len(text),
             )
             return text, filename
@@ -108,3 +109,11 @@ class DocumentService:
         text = text.replace("\x00", "").replace("\r\n", "\n").replace("\r", "\n")
         lines = [re.sub(r"[ \t]+", " ", line).strip() for line in text.splitlines()]
         return "\n".join(line for line in lines if line).strip()
+
+    @staticmethod
+    def _format_size(size_bytes: int) -> str:
+        if size_bytes < 1024:
+            return f"{size_bytes}B"
+        if size_bytes < 1024 * 1024:
+            return f"{size_bytes / 1024:.1f}KB"
+        return f"{size_bytes / (1024 * 1024):.1f}MB"

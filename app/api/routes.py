@@ -29,6 +29,9 @@ async def extract_draft_reason(
 ) -> DraftReasonResponse:
     _check_api_key(request, x_api_key)
     reason, filename, chars = await request.app.state.draft_reason_service.extract_from_upload(file)
+    request.state.filename = filename
+    request.state.source_chars = chars
+    request.state.result_chars = len(reason)
     return DraftReasonResponse(
         data=DraftReasonData(
             draft_reason=reason,
@@ -49,4 +52,3 @@ async def ready(request: Request) -> HealthResponse:
     if not request.app.state.settings.llm_ready:
         raise ServiceError(503, "LLM_NOT_CONFIGURED", "LLM 服务尚未配置")
     return HealthResponse(status="ready")
-

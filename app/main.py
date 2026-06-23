@@ -27,7 +27,7 @@ def create_app(
         request.state.request_id = request.headers.get("X-Request-ID") or uuid.uuid4().hex
         started_at = time.perf_counter()
         with logger.contextualize(request_id=request.state.request_id):
-            logger.info(
+            logger.debug(
                 "request_started method={} path={} client={}",
                 request.method,
                 request.url.path,
@@ -44,23 +44,30 @@ def create_app(
                 )
                 raise
             response.headers["X-Request-ID"] = request.state.request_id
-            logger.info(
-                "request_completed method={} path={} status={} duration_ms={:.2f}",
-                request.method,
-                request.url.path,
+            if request.url.path.startswith("/health/"):
+                completion_logger = logger.debug
+            elif response.status_code >= 400:
+                completion_logger = logger.warning
+            else:
+                completion_logger = logger.info
+            completion_logger(
+                "{} 请求完成 | 状态={}{} | 耗时={:.2f}s | 结果长度={}字符 | 文件名={}",
+                "✅" if response.status_code < 400 else "❌",
                 response.status_code,
-                (time.perf_counter() - started_at) * 1000,
+                (
+                    " | 错误码=" + request.state.error_code
+                    if hasattr(request.state, "error_code")
+                    else ""
+                ),
+                time.perf_counter() - started_at,
+                getattr(request.state, "result_chars", "-"),
+                getattr(request.state, "filename", "-"),
             )
             return response
 
     @app.exception_handler(ServiceError)
     async def service_error_handler(request: Request, exc: ServiceError) -> JSONResponse:
-        logger.warning(
-            "service_error code={} status={} message={}",
-            exc.code,
-            exc.status_code,
-            exc.message,
-        )
+        request.state.error_code = exc.code
         return JSONResponse(
             status_code=exc.status_code,
             content={
@@ -75,7 +82,8 @@ def create_app(
     async def validation_error_handler(
         request: Request, exc: RequestValidationError
     ) -> JSONResponse:
-        logger.warning("request_validation_failed errors={}", len(exc.errors()))
+        request.state.error_code = "INVALID_REQUEST"
+        logger.debug("request_validation_failed errors={}", len(exc.errors()))
         return JSONResponse(
             status_code=422,
             content={
@@ -88,11 +96,11 @@ def create_app(
 
     app.include_router(router)
     logger.info(
-        "application_configured app={} env={} llm_model={} api_key_enabled={}",
+        "🚀 应用配置完成 | 服务={} | 环境={} | 模型={} | 接口鉴权={}",
         settings.app_name,
         settings.app_env,
         settings.llm_model or "not-configured",
-        settings.api_key_enabled,
+        "开启" if settings.api_key_enabled else "关闭",
     )
     return app
 

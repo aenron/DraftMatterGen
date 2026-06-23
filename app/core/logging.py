@@ -1,4 +1,5 @@
 import logging
+import json
 import sys
 
 from loguru import logger
@@ -29,19 +30,36 @@ def configure_logging(settings: Settings) -> None:
 
     logger.remove()
     logger.configure(patcher=add_defaults)
-    logger.add(
-        sys.stderr,
-        level=settings.log_level.upper(),
-        serialize=settings.log_json,
-        backtrace=False,
-        diagnose=False,
-        format=(
-            "<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | "
-            "<level>{level: <8}</level> | request_id={extra[request_id]} | "
-            "<cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - "
-            "<level>{message}</level>"
-        ),
-    )
+    if settings.log_json:
+        def compact_json_sink(message) -> None:
+            record = message.record
+            payload = {
+                "time": record["time"].isoformat(),
+                "level": record["level"].name,
+                "request_id": record["extra"].get("request_id", "-"),
+                "message": record["message"],
+            }
+            sys.stderr.write(json.dumps(payload, ensure_ascii=False) + "\n")
+
+        logger.add(
+            compact_json_sink,
+            level=settings.log_level.upper(),
+            backtrace=False,
+            diagnose=False,
+        )
+    else:
+        logger.add(
+            sys.stderr,
+            level=settings.log_level.upper(),
+            backtrace=False,
+            diagnose=False,
+            format=(
+                "<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | "
+                "<level>{level: <7}</level> | "
+                "<cyan>{extra[request_id]}</cyan> | "
+                "<level>{message}</level>"
+            ),
+        )
 
     logging.basicConfig(handlers=[InterceptHandler()], level=0, force=True)
     for name in ("uvicorn", "uvicorn.error", "uvicorn.access", "fastapi"):
@@ -49,3 +67,9 @@ def configure_logging(settings: Settings) -> None:
         standard_logger.handlers = [InterceptHandler()]
         standard_logger.propagate = False
 
+    # These libraries otherwise duplicate information already emitted by the
+    # application request and LLM summary logs.
+    logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+    logging.getLogger("uvicorn.error").setLevel(logging.WARNING)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)

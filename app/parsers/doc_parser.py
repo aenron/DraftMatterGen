@@ -23,7 +23,7 @@ class DocParser(DocumentParser):
 
         env = os.environ.copy()
         env["HOME"] = str(profile_dir)
-        logger.info("doc_conversion_started filename={}", path.name)
+        logger.debug("doc_conversion_started filename={}", path.name)
         try:
             process = await asyncio.create_subprocess_exec(
                 self.settings.libreoffice_binary,
@@ -61,5 +61,5 @@ class DocParser(DocumentParser):
                 "DOCUMENT_CONVERSION_FAILED",
                 "DOC 文档转换失败",
             )
-        logger.info("doc_conversion_completed filename={}", path.name)
+        logger.debug("doc_conversion_completed filename={}", path.name)
         return await self.docx_parser.extract(converted)

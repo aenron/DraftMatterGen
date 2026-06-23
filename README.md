@@ -22,8 +22,10 @@
 python -m venv .venv
 pip install -r requirements-dev.txt
 copy .env.example .env
-uvicorn app.main:app --reload
+uvicorn app.main:app --reload --no-access-log --log-level warning
 ```
+
+如果仍看到 `Will watch for changes`、`Started reloader process` 等信息，说明实际启动命令没有带上 `--log-level warning`；这些日志由 Uvicorn reloader 父进程在应用加载前输出，应用内日志配置无法拦截。
 
 编辑 `.env`，至少填写：
 
@@ -40,7 +42,14 @@ LOG_LEVEL=INFO
 LOG_JSON=false
 ```
 
-生产环境可设置 `LOG_JSON=true` 输出 JSON 日志，方便日志平台采集。
+生产环境可设置 `LOG_JSON=true` 输出精简 JSON 日志，方便日志平台采集。默认 `INFO` 级别下每个成功请求只输出一条业务汇总日志；排查文档解析或模型调用细节时临时设置 `LOG_LEVEL=DEBUG`。
+
+一次正常请求会输出两条主要业务日志：
+
+```text
+2026-06-23 16:30:00.123 | INFO    | request-id | 📥 文件接收完成 | 文件名=样例1.docx | 类型=docx | 大小=13.5KB | 文本长度=180字符
+2026-06-23 16:30:01.708 | INFO    | request-id | ✅ 请求完成 | 状态=200 | 耗时=1.59s | 结果长度=42字符 | 文件名=样例1.docx
+```
 
 模型服务需兼容：
 

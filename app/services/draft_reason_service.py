@@ -23,7 +23,7 @@ class DraftReasonService:
         text, filename = await self.document_service.extract_upload(upload)
         reason = await self._extract_text(text)
         normalized = self._normalize_reason(reason)
-        logger.info(
+        logger.debug(
             "draft_reason_completed filename={} source_chars={} result_chars={}",
             filename,
             len(text),

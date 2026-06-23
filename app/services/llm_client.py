@@ -54,7 +54,7 @@ class LLMClient:
             for attempt in range(self.settings.llm_max_retries + 1):
                 started_at = time.perf_counter()
                 try:
-                    logger.info(
+                    logger.debug(
                         "llm_request_started model={} input_chars={} attempt={}",
                         self.settings.llm_model,
                         len(document_text),
@@ -70,7 +70,7 @@ class LLMClient:
                             f"LLM 服务拒绝请求，状态码 {response.status_code}",
                         )
                     result = self._parse_response(response.json())
-                    logger.info(
+                    logger.debug(
                         "llm_request_completed model={} status={} result_chars={} duration_ms={:.2f}",
                         self.settings.llm_model,
                         response.status_code,
@@ -83,17 +83,27 @@ class LLMClient:
                 except (httpx.TimeoutException, httpx.NetworkError, httpx.HTTPStatusError) as exc:
                     last_error = exc
                     logger.warning(
-                        "llm_request_retryable_error model={} attempt={} error_type={} duration_ms={:.2f}",
+                        "⚠️ 模型调用异常，准备重试 | 模型={} | 第{}次 | 异常={} | 耗时={:.2f}s",
                         self.settings.llm_model,
                         attempt + 1,
                         type(exc).__name__,
-                        (time.perf_counter() - started_at) * 1000,
+                        time.perf_counter() - started_at,
                     )
                     if attempt < self.settings.llm_max_retries:
                         await asyncio.sleep(min(0.5 * (2**attempt), 2.0))
                         continue
                 except (ValueError, KeyError, TypeError) as exc:
-                    logger.warning(
+                    last_error = exc
+                    if attempt < self.settings.llm_max_retries:
+                        logger.warning(
+                            "⚠️ 模型响应格式无效，准备重试 | 模型={} | 第{}次 | 异常={}",
+                            self.settings.llm_model,
+                            attempt + 1,
+                            type(exc).__name__,
+                        )
+                        await asyncio.sleep(min(0.5 * (2**attempt), 2.0))
+                        continue
+                    logger.debug(
                         "llm_invalid_response model={} error_type={}",
                         self.settings.llm_model,
                         type(exc).__name__,
@@ -110,11 +120,37 @@ class LLMClient:
         if not isinstance(content, str):
             raise ValueError("message content is not a string")
 
-        content = content.strip()
-        content = re.sub(r"^```(?:json)?\s*", "", content, flags=re.IGNORECASE)
-        content = re.sub(r"\s*```$", "", content)
-        parsed = json.loads(content)
+        content = re.sub(r"<think>.*?</think>", "", content, flags=re.IGNORECASE | re.DOTALL).strip()
+        parsed = LLMClient._decode_json_object(content)
         reason = parsed.get("draft_reason")
         if not isinstance(reason, str) or not reason.strip():
             raise ValueError("draft_reason is missing")
         return reason.strip()
+
+    @staticmethod
+    def _decode_json_object(content: str) -> dict[str, Any]:
+        candidates = [content]
+        fenced = re.findall(r"```(?:json)?\s*(.*?)\s*```", content, flags=re.IGNORECASE | re.DOTALL)
+        candidates.extend(fenced)
+
+        decoder = json.JSONDecoder()
+        for candidate in candidates:
+            candidate = candidate.strip()
+            try:
+                parsed = json.loads(candidate)
+                if isinstance(parsed, dict):
+                    return parsed
+            except json.JSONDecodeError:
+                pass
+
+            for index, char in enumerate(candidate):
+                if char != "{":
+                    continue
+                try:
+                    parsed, _ = decoder.raw_decode(candidate[index:])
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(parsed, dict):
+                    return parsed
+
+        raise json.JSONDecodeError("No JSON object found", content, 0)
