@@ -2,6 +2,8 @@
 
 基于 FastAPI 的文档拟稿事由提取接口。服务接收 DOCX、DOC 或 TXT 文件，提取正文后调用 OpenAI 兼容的大模型接口，返回归纳后的“拟稿事由”。
 
+完整接口说明参见 [docs/API.md](docs/API.md)。
+
 ## 功能
 
 - 支持 DOCX、旧版 DOC、TXT。
