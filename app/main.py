@@ -85,7 +85,8 @@ def create_app(
         return JSONResponse(
             status_code=exc.status_code,
             content={
-                "code": exc.code,
+                "code": exc.status_code,
+                "error_code": exc.code,
                 "message": exc.message,
                 "data": None,
                 "request_id": getattr(request.state, "request_id", ""),
@@ -101,7 +102,8 @@ def create_app(
         return JSONResponse(
             status_code=422,
             content={
-                "code": "INVALID_REQUEST",
+                "code": 422,
+                "error_code": "INVALID_REQUEST",
                 "message": "请求参数校验失败",
                 "data": None,
                 "request_id": getattr(request.state, "request_id", ""),

@@ -10,7 +10,7 @@ class DraftReasonData(BaseModel):
 
 
 class DraftReasonResponse(BaseModel):
-    code: int = 0
+    code: int = 200
     message: str = "success"
     data: DraftReasonData
     request_id: str
@@ -27,7 +27,7 @@ class AsyncJobSubmissionData(BaseModel):
 
 
 class AsyncJobSubmissionResponse(BaseModel):
-    code: int = 0
+    code: int = 202
     message: str = "accepted"
     data: AsyncJobSubmissionData
     request_id: str
@@ -49,7 +49,7 @@ class AsyncJobData(BaseModel):
 
 
 class AsyncJobResponse(BaseModel):
-    code: int = 0
+    code: int = 200
     message: str = "success"
     data: AsyncJobData
     request_id: str

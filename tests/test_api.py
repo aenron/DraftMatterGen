@@ -47,6 +47,7 @@ def test_extract_success(tmp_path: Path) -> None:
     )
     assert response.status_code == 200
     body = response.json()
+    assert body["code"] == 200
     assert body["data"]["draft_reason"] == "根据工作需要，拟办理相关事项。"
     assert body["data"]["filename"] is None
     assert response.headers["X-Request-ID"] == body["request_id"]
@@ -86,7 +87,8 @@ def test_health(tmp_path: Path) -> None:
 def test_missing_file_uses_standard_error(tmp_path: Path) -> None:
     response = make_client(tmp_path).post("/api/v1/draft-reasons/extract")
     assert response.status_code == 422
-    assert response.json()["code"] == "INVALID_REQUEST"
+    assert response.json()["code"] == 422
+    assert response.json()["error_code"] == "INVALID_REQUEST"
 
 
 def test_async_extract_success(tmp_path: Path) -> None:
@@ -96,6 +98,7 @@ def test_async_extract_success(tmp_path: Path) -> None:
             files={"file": ("sample.txt", "异步测试".encode(), "text/plain")},
         )
         assert submitted.status_code == 202
+        assert submitted.json()["code"] == 202
         submission = submitted.json()["data"]
         assert submission["status"] == "queued"
         assert submission["job_id"] in submission["status_url"]
@@ -120,7 +123,8 @@ def test_async_job_not_found(tmp_path: Path) -> None:
     with make_client(tmp_path) as client:
         response = client.get("/api/v1/draft-reasons/jobs/not-found")
         assert response.status_code == 404
-        assert response.json()["code"] == "JOB_NOT_FOUND"
+        assert response.json()["code"] == 404
+        assert response.json()["error_code"] == "JOB_NOT_FOUND"
 
 
 def test_async_extract_failure_is_queryable(tmp_path: Path) -> None:

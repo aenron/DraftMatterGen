@@ -85,7 +85,7 @@ curl -X POST "http://localhost:8000/api/v1/draft-reasons/extract" \
 
 ```json
 {
-  "code": 0,
+  "code": 200,
   "message": "success",
   "data": {
     "draft_reason": "为保障三院地区机房气体灭火系统的稳定运行，我办拟与原服务商续签维保服务合同。报院部阅示。",
@@ -112,7 +112,7 @@ curl -X POST "http://localhost:8000/api/v1/draft-reasons/extract-async" \
 
 ```json
 {
-  "code": 0,
+  "code": 202,
   "message": "accepted",
   "data": {
     "job_id": "a73cd05ff07f4d18bb4e0f7758255ec4",
