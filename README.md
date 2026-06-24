@@ -13,6 +13,7 @@
 - 长文档分段提取后二次合并。
 - 支持 API Key 鉴权、请求 ID 和容器健康检查。
 - 使用 Loguru 输出请求、解析、模型调用、耗时和异常日志，不记录文档正文或密钥。
+- 同时提供同步接口和异步任务接口；异步接口支持排队、状态查询、失败信息和结果过期清理。
 
 ## 本地运行
 
@@ -64,6 +65,14 @@ POST {LLM_BASE_URL}/chat/completions
 LLM_RESPONSE_FORMAT_JSON=false
 ```
 
+异步任务参数：
+
+```dotenv
+ASYNC_QUEUE_MAX_SIZE=100
+ASYNC_WORKER_COUNT=2
+ASYNC_JOB_TTL_SECONDS=3600
+```
+
 ## 调用接口
 
 ```bash
@@ -88,6 +97,42 @@ curl -X POST "http://localhost:8000/api/v1/draft-reasons/extract" \
 ```
 
 传入 `?include_metadata=true` 可返回文件名和处理字符数。
+
+## 异步接口
+
+提交任务后接口立即返回 HTTP `202`：
+
+```bash
+curl -X POST "http://localhost:8000/api/v1/draft-reasons/extract-async" \
+  -H "X-API-Key: replace-me" \
+  -F "file=@参考文件/样例1.docx"
+```
+
+响应示例：
+
+```json
+{
+  "code": 0,
+  "message": "accepted",
+  "data": {
+    "job_id": "a73cd05ff07f4d18bb4e0f7758255ec4",
+    "status": "queued",
+    "status_url": "http://localhost:8000/api/v1/draft-reasons/jobs/a73cd05ff07f4d18bb4e0f7758255ec4"
+  },
+  "request_id": "9ed20e33b8424cdf"
+}
+```
+
+查询任务：
+
+```bash
+curl "http://localhost:8000/api/v1/draft-reasons/jobs/a73cd05ff07f4d18bb4e0f7758255ec4" \
+  -H "X-API-Key: replace-me"
+```
+
+`status` 可能为 `queued`、`processing`、`succeeded` 或 `failed`。成功时 `result` 返回拟稿事由、文件名和处理字符数；失败时 `error` 返回错误码和说明。
+
+当前异步队列及任务状态保存在单个服务进程内，容器已固定为一个 Uvicorn worker，实际任务并发由 `ASYNC_WORKER_COUNT` 控制。容器重启会清空未完成任务；如需多副本和任务持久化，应将任务层升级为 Redis/Celery 等外部队列。
 
 接口文档：`http://localhost:8000/docs`
 

@@ -1,8 +1,17 @@
 import secrets
+from pathlib import Path
 
 from fastapi import APIRouter, File, Header, Query, Request, UploadFile
 
-from app.api.schemas import DraftReasonData, DraftReasonResponse, HealthResponse
+from app.api.schemas import (
+    AsyncJobData,
+    AsyncJobResponse,
+    AsyncJobSubmissionData,
+    AsyncJobSubmissionResponse,
+    DraftReasonData,
+    DraftReasonResponse,
+    HealthResponse,
+)
 from app.core.errors import ServiceError
 
 
@@ -38,6 +47,47 @@ async def extract_draft_reason(
             filename=filename if include_metadata else None,
             chars_processed=chars if include_metadata else None,
         ),
+        request_id=request.state.request_id,
+    )
+
+
+@router.post(
+    "/api/v1/draft-reasons/extract-async",
+    response_model=AsyncJobSubmissionResponse,
+    status_code=202,
+)
+async def submit_draft_reason_job(
+    request: Request,
+    file: UploadFile = File(...),
+    x_api_key: str | None = Header(None, alias="X-API-Key"),
+) -> AsyncJobSubmissionResponse:
+    _check_api_key(request, x_api_key)
+    request.state.filename = Path(file.filename or "").name or "-"
+    record = await request.app.state.async_job_manager.submit(file, request.state.request_id)
+    status_url = str(request.url_for("get_draft_reason_job", job_id=record.job_id))
+    return AsyncJobSubmissionResponse(
+        data=AsyncJobSubmissionData(
+            job_id=record.job_id,
+            status=record.status,
+            status_url=status_url,
+        ),
+        request_id=request.state.request_id,
+    )
+
+
+@router.get(
+    "/api/v1/draft-reasons/jobs/{job_id}",
+    response_model=AsyncJobResponse,
+)
+async def get_draft_reason_job(
+    job_id: str,
+    request: Request,
+    x_api_key: str | None = Header(None, alias="X-API-Key"),
+) -> AsyncJobResponse:
+    _check_api_key(request, x_api_key)
+    snapshot = await request.app.state.async_job_manager.get(job_id)
+    return AsyncJobResponse(
+        data=AsyncJobData.model_validate(snapshot),
         request_id=request.state.request_id,
     )
 

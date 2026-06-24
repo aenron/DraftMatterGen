@@ -42,6 +42,15 @@ class Settings(BaseSettings):
     conversion_timeout_seconds: float = Field(
         60, gt=0, validation_alias="CONVERSION_TIMEOUT_SECONDS"
     )
+    async_queue_max_size: int = Field(
+        100, gt=0, le=10_000, validation_alias="ASYNC_QUEUE_MAX_SIZE"
+    )
+    async_worker_count: int = Field(
+        2, gt=0, le=32, validation_alias="ASYNC_WORKER_COUNT"
+    )
+    async_job_ttl_seconds: int = Field(
+        3600, ge=60, validation_alias="ASYNC_JOB_TTL_SECONDS"
+    )
 
     @property
     def allowed_extension_set(self) -> set[str]:

@@ -1,9 +1,11 @@
 from io import BytesIO
 from pathlib import Path
+import time
 
 from fastapi.testclient import TestClient
 
 from app.core.config import Settings
+from app.core.errors import ServiceError
 from app.main import create_app
 
 
@@ -14,7 +16,17 @@ class FakeDraftReasonService:
         return "根据工作需要，拟办理相关事项。", upload.filename, 120
 
 
-def make_client(tmp_path: Path, api_key_enabled: bool = False) -> TestClient:
+class FailingDraftReasonService:
+    async def extract_from_upload(self, upload):
+        await upload.close()
+        raise ServiceError(502, "LLM_UNAVAILABLE", "LLM 服务暂时不可用")
+
+
+def make_client(
+    tmp_path: Path,
+    api_key_enabled: bool = False,
+    service=None,
+) -> TestClient:
     settings = Settings(
         APP_ENV="test",
         API_KEY_ENABLED=api_key_enabled,
@@ -23,7 +35,7 @@ def make_client(tmp_path: Path, api_key_enabled: bool = False) -> TestClient:
         LLM_MODEL="test-model",
         TEMP_DIR=tmp_path,
     )
-    app = create_app(settings, FakeDraftReasonService())
+    app = create_app(settings, service or FakeDraftReasonService())
     return TestClient(app)
 
 
@@ -75,3 +87,62 @@ def test_missing_file_uses_standard_error(tmp_path: Path) -> None:
     response = make_client(tmp_path).post("/api/v1/draft-reasons/extract")
     assert response.status_code == 422
     assert response.json()["code"] == "INVALID_REQUEST"
+
+
+def test_async_extract_success(tmp_path: Path) -> None:
+    with make_client(tmp_path) as client:
+        submitted = client.post(
+            "/api/v1/draft-reasons/extract-async",
+            files={"file": ("sample.txt", "异步测试".encode(), "text/plain")},
+        )
+        assert submitted.status_code == 202
+        submission = submitted.json()["data"]
+        assert submission["status"] == "queued"
+        assert submission["job_id"] in submission["status_url"]
+
+        body = None
+        for _ in range(50):
+            response = client.get(f"/api/v1/draft-reasons/jobs/{submission['job_id']}")
+            body = response.json()["data"]
+            if body["status"] in {"succeeded", "failed"}:
+                break
+            time.sleep(0.01)
+
+        assert body is not None
+        assert body["status"] == "succeeded"
+        assert body["result"]["draft_reason"] == "根据工作需要，拟办理相关事项。"
+        assert body["result"]["filename"] == "sample.txt"
+        assert body["result"]["chars_processed"] == 120
+        assert body["error"] is None
+
+
+def test_async_job_not_found(tmp_path: Path) -> None:
+    with make_client(tmp_path) as client:
+        response = client.get("/api/v1/draft-reasons/jobs/not-found")
+        assert response.status_code == 404
+        assert response.json()["code"] == "JOB_NOT_FOUND"
+
+
+def test_async_extract_failure_is_queryable(tmp_path: Path) -> None:
+    with make_client(tmp_path, service=FailingDraftReasonService()) as client:
+        submitted = client.post(
+            "/api/v1/draft-reasons/extract-async",
+            files={"file": ("sample.txt", b"test", "text/plain")},
+        ).json()["data"]
+
+        body = None
+        for _ in range(50):
+            body = client.get(
+                f"/api/v1/draft-reasons/jobs/{submitted['job_id']}"
+            ).json()["data"]
+            if body["status"] == "failed":
+                break
+            time.sleep(0.01)
+
+        assert body is not None
+        assert body["status"] == "failed"
+        assert body["result"] is None
+        assert body["error"] == {
+            "code": "LLM_UNAVAILABLE",
+            "message": "LLM 服务暂时不可用",
+        }

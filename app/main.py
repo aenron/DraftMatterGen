@@ -1,5 +1,6 @@
 import time
 import uuid
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -11,6 +12,7 @@ from app.core.config import Settings, get_settings
 from app.core.errors import ServiceError
 from app.core.logging import configure_logging
 from app.services.draft_reason_service import DraftReasonService
+from app.services.async_job_manager import AsyncJobManager
 
 
 def create_app(
@@ -18,9 +20,21 @@ def create_app(
 ) -> FastAPI:
     settings = settings or get_settings()
     configure_logging(settings)
-    app = FastAPI(title=settings.app_name, version="1.0.0")
+    service = draft_reason_service or DraftReasonService(settings)
+    async_job_manager = AsyncJobManager(settings, service)
+
+    @asynccontextmanager
+    async def lifespan(_: FastAPI):
+        await async_job_manager.start()
+        try:
+            yield
+        finally:
+            await async_job_manager.stop()
+
+    app = FastAPI(title=settings.app_name, version="1.1.0", lifespan=lifespan)
     app.state.settings = settings
-    app.state.draft_reason_service = draft_reason_service or DraftReasonService(settings)
+    app.state.draft_reason_service = service
+    app.state.async_job_manager = async_job_manager
 
     @app.middleware("http")
     async def request_context(request: Request, call_next):
