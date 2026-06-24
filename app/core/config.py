@@ -51,6 +51,7 @@ class Settings(BaseSettings):
     async_job_ttl_seconds: int = Field(
         3600, ge=60, validation_alias="ASYNC_JOB_TTL_SECONDS"
     )
+    async_data_dir: Path = Field(Path("./data"), validation_alias="ASYNC_DATA_DIR")
 
     @property
     def allowed_extension_set(self) -> set[str]:

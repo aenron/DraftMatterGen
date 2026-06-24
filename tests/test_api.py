@@ -1,3 +1,4 @@
+import asyncio
 from io import BytesIO
 from pathlib import Path
 import time
@@ -22,6 +23,11 @@ class FailingDraftReasonService:
         raise ServiceError(502, "LLM_UNAVAILABLE", "LLM 服务暂时不可用")
 
 
+class BlockingDraftReasonService:
+    async def extract_from_upload(self, upload):
+        await asyncio.sleep(60)
+
+
 def make_client(
     tmp_path: Path,
     api_key_enabled: bool = False,
@@ -34,6 +40,7 @@ def make_client(
         LLM_BASE_URL="http://llm.test/v1",
         LLM_MODEL="test-model",
         TEMP_DIR=tmp_path,
+        ASYNC_DATA_DIR=tmp_path / "async-data",
     )
     app = create_app(settings, service or FakeDraftReasonService())
     return TestClient(app)
@@ -150,3 +157,37 @@ def test_async_extract_failure_is_queryable(tmp_path: Path) -> None:
             "code": "LLM_UNAVAILABLE",
             "message": "LLM 服务暂时不可用",
         }
+
+
+def test_async_job_recovers_after_restart(tmp_path: Path) -> None:
+    job_id = None
+    with make_client(tmp_path, service=BlockingDraftReasonService()) as client:
+        job_id = client.post(
+            "/api/v1/draft-reasons/extract-async",
+            files={"file": ("recover.txt", b"persistent content", "text/plain")},
+        ).json()["data"]["job_id"]
+
+        for _ in range(50):
+            status = client.get(f"/api/v1/draft-reasons/jobs/{job_id}").json()["data"][
+                "status"
+            ]
+            if status == "processing":
+                break
+            time.sleep(0.01)
+        assert status == "processing"
+
+    assert (tmp_path / "async-data" / "jobs.db").exists()
+
+    with make_client(tmp_path) as restarted_client:
+        body = None
+        for _ in range(100):
+            body = restarted_client.get(
+                f"/api/v1/draft-reasons/jobs/{job_id}"
+            ).json()["data"]
+            if body["status"] in {"succeeded", "failed"}:
+                break
+            time.sleep(0.01)
+
+        assert body is not None
+        assert body["status"] == "succeeded"
+        assert body["result"]["filename"] == "recover.txt"

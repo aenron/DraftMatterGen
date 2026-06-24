@@ -3,6 +3,8 @@ __pycache__/
 .pytest_cache/
 .pytest-tmp/
 .docker-cache/
+data/*
+!data/.gitkeep
 .coverage
 .env
 .venv/

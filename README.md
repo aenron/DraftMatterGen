@@ -71,6 +71,7 @@ LLM_RESPONSE_FORMAT_JSON=false
 ASYNC_QUEUE_MAX_SIZE=100
 ASYNC_WORKER_COUNT=2
 ASYNC_JOB_TTL_SECONDS=3600
+ASYNC_DATA_DIR=./data
 ```
 
 ## 调用接口
@@ -132,7 +133,9 @@ curl "http://localhost:8000/api/v1/draft-reasons/jobs/a73cd05ff07f4d18bb4e0f7758
 
 `status` 可能为 `queued`、`processing`、`succeeded` 或 `failed`。成功时 `result` 返回拟稿事由、文件名和处理字符数；失败时 `error` 返回错误码和说明。
 
-当前异步队列及任务状态保存在单个服务进程内，容器已固定为一个 Uvicorn worker，实际任务并发由 `ASYNC_WORKER_COUNT` 控制。容器重启会清空未完成任务；如需多副本和任务持久化，应将任务层升级为 Redis/Celery 等外部队列。
+异步任务状态使用 SQLite WAL 模式持久化，上传文件在任务完成前保存在数据目录。容器已固定为一个 Uvicorn worker，实际任务并发由 `ASYNC_WORKER_COUNT` 控制。服务重启时，原 `processing` 任务会恢复为 `queued` 并自动重新执行。
+
+该方案适用于单实例部署；不要让多个容器同时读写同一个 SQLite 文件。需要横向扩容时，应迁移到 PostgreSQL 或 Redis/Celery 等外部任务系统。
 
 接口文档：`http://localhost:8000/docs`
 
@@ -151,6 +154,16 @@ docker compose up --build -d
 ```
 
 镜像默认使用中国标准时间 `Asia/Shanghai`。修改 `TZ` 或时区相关配置后需要重新构建镜像，而不是只重启旧容器。
+
+Compose 将宿主机的 `./data` 挂载为容器内的 `/data`：
+
+```text
+data/
+├─ jobs.db          # SQLite 任务状态和结果
+└─ uploads/         # 尚未完成的任务源文件
+```
+
+入口脚本会创建目录、修正写入权限，然后以非 root 用户启动服务。升级或重建容器不会删除该目录。备份时停止服务并复制整个 `data` 目录即可。
 
 ### 加速镜像构建
 
