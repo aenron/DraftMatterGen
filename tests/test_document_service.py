@@ -34,8 +34,7 @@ def test_reject_binary_disguised_as_txt(tmp_path: Path) -> None:
 
 def test_reject_unsupported_extension(tmp_path: Path) -> None:
     service = make_service(tmp_path)
-    upload = UploadFile(filename="sample.pdf", file=BytesIO(b"content"))
+    upload = UploadFile(filename="sample.exe", file=BytesIO(b"content"))
     with pytest.raises(ServiceError) as error:
         asyncio.run(service.extract_upload(upload))
     assert error.value.status_code == 415
-

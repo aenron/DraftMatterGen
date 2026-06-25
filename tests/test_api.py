@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from app.core.config import Settings
 from app.core.errors import ServiceError
 from app.main import create_app
+from app.api.schemas import DocumentSummaryItem
 
 
 class FakeDraftReasonService:
@@ -28,10 +29,37 @@ class BlockingDraftReasonService:
         await asyncio.sleep(60)
 
 
+class FakeDocumentSummaryService:
+    async def summarize_uploads(self, uploads):
+        results = []
+        for upload in uploads:
+            content = await upload.read()
+            await upload.close()
+            if upload.filename.endswith(".xlsx"):
+                results.append(
+                    DocumentSummaryItem(
+                        filename=upload.filename,
+                        status="ignored",
+                        reason="xlsx 文件已按规则忽略",
+                    )
+                )
+            else:
+                results.append(
+                    DocumentSummaryItem(
+                        filename=upload.filename,
+                        status="succeeded",
+                        summary=f"摘要：{upload.filename}",
+                        chars_processed=len(content),
+                    )
+                )
+        return results
+
+
 def make_client(
     tmp_path: Path,
     api_key_enabled: bool = False,
     service=None,
+    summary_service=None,
 ) -> TestClient:
     settings = Settings(
         APP_ENV="test",
@@ -42,7 +70,7 @@ def make_client(
         TEMP_DIR=tmp_path,
         ASYNC_DATA_DIR=tmp_path / "async-data",
     )
-    app = create_app(settings, service or FakeDraftReasonService())
+    app = create_app(settings, service or FakeDraftReasonService(), summary_service)
     return TestClient(app)
 
 
@@ -83,6 +111,31 @@ def test_api_key(tmp_path: Path) -> None:
         files={"file": ("sample.txt", b"test", "text/plain")},
     )
     assert authorized.status_code == 200
+
+
+def test_document_summary_multi_file(tmp_path: Path) -> None:
+    client = make_client(tmp_path, summary_service=FakeDocumentSummaryService())
+    response = client.post(
+        "/api/v1/document-summaries/extract",
+        files=[
+            ("files", ("sample.txt", b"test", "text/plain")),
+            (
+                "files",
+                (
+                    "budget.xlsx",
+                    b"ignored",
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                ),
+            ),
+        ],
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["code"] == 200
+    assert body["data"]["summaries"][0]["status"] == "succeeded"
+    assert body["data"]["summaries"][0]["summary"] == "摘要：sample.txt"
+    assert body["data"]["summaries"][1]["status"] == "ignored"
+    assert body["data"]["summaries"][1]["summary"] is None
 
 
 def test_health(tmp_path: Path) -> None:

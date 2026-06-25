@@ -8,6 +8,8 @@ from app.api.schemas import (
     AsyncJobResponse,
     AsyncJobSubmissionData,
     AsyncJobSubmissionResponse,
+    DocumentSummaryData,
+    DocumentSummaryResponse,
     DraftReasonData,
     DraftReasonResponse,
     HealthResponse,
@@ -47,6 +49,22 @@ async def extract_draft_reason(
             filename=filename if include_metadata else None,
             chars_processed=chars if include_metadata else None,
         ),
+        request_id=request.state.request_id,
+    )
+
+
+@router.post("/api/v1/document-summaries/extract", response_model=DocumentSummaryResponse)
+async def extract_document_summaries(
+    request: Request,
+    files: list[UploadFile] = File(...),
+    x_api_key: str | None = Header(None, alias="X-API-Key"),
+) -> DocumentSummaryResponse:
+    _check_api_key(request, x_api_key)
+    request.state.filename = ",".join(Path(file.filename or "").name or "-" for file in files)
+    summaries = await request.app.state.document_summary_service.summarize_uploads(files)
+    request.state.result_chars = sum(len(item.summary or "") for item in summaries)
+    return DocumentSummaryResponse(
+        data=DocumentSummaryData(summaries=summaries),
         request_id=request.state.request_id,
     )
 

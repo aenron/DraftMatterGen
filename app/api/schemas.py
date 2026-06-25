@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel
 
@@ -13,6 +14,25 @@ class DraftReasonResponse(BaseModel):
     code: int = 200
     message: str = "success"
     data: DraftReasonData
+    request_id: str
+
+
+class DocumentSummaryItem(BaseModel):
+    filename: str
+    status: Literal["succeeded", "ignored", "failed"]
+    summary: str | None = None
+    reason: str | None = None
+    chars_processed: int | None = None
+
+
+class DocumentSummaryData(BaseModel):
+    summaries: list[DocumentSummaryItem]
+
+
+class DocumentSummaryResponse(BaseModel):
+    code: int = 200
+    message: str = "success"
+    data: DocumentSummaryData
     request_id: str
 
 

@@ -9,7 +9,7 @@
 | 默认服务地址 | `http://168.8.6.168:8002` |
 | 数据格式 | JSON |
 | 文件上传格式 | `multipart/form-data` |
-| 支持文件类型 | `.docx`、`.doc`、`.txt` |
+| 支持文件类型 | 拟稿事由：`.docx`、`.doc`、`.txt`；文档摘要：`.docx`、`.doc`、`.pdf`、`.txt`，`.xlsx` 按规则忽略 |
 | 默认文件大小上限 | 20 MB，可通过环境变量调整 |
 
 交互式接口文档：
@@ -353,11 +353,13 @@ LLM 地址和模型名称已配置时返回：
 | error_code | HTTP 状态 | 说明 |
 |---|---:|---|
 | INVALID_FILENAME | 400 | 文件名或扩展名无效 |
+| NO_FILES | 400 | 未上传任何文件 |
 | EMPTY_FILE | 400 | 上传文件为空 |
 | FILE_SIGNATURE_MISMATCH | 400 | 文件扩展名和实际内容不一致 |
 | UNAUTHORIZED | 401 | API Key 无效或缺失 |
 | JOB_NOT_FOUND | 404 | 异步任务不存在或已过期 |
 | FILE_TOO_LARGE | 413 | 上传文件超过大小限制 |
+| TOO_MANY_FILES | 413 | 一次上传文件数超过限制 |
 | DOCUMENT_TOO_LONG | 413 | 文档内容超过处理范围 |
 | UNSUPPORTED_FILE_TYPE | 415 | 文件类型不受支持 |
 | INVALID_REQUEST | 422 | 请求参数校验失败 |
@@ -369,12 +371,83 @@ LLM 地址和模型名称已配置时返回：
 | LLM_INVALID_RESPONSE | 502 | 模型响应格式不符合要求 |
 | LLM_UNAVAILABLE | 502 | 模型服务暂时不可用 |
 | LLM_NOT_CONFIGURED | 503 | 模型地址或模型名称未配置 |
+| PDF_PARSER_UNAVAILABLE | 500 | PDF 解析组件不可用 |
 | ASYNC_QUEUE_FULL | 503 | 异步任务队列已满 |
 | LLM_TIMEOUT | 504 | 模型调用超时 |
 
-## 9. Python 调用示例
+## 9. 文档摘要生成
 
-### 9.1 同步调用
+一次上传多个文件，服务逐个解析并生成主要内容摘要。`.xlsx` 文件不会进入解析和模型处理，返回 `ignored` 状态。单个文件解析或摘要失败时，不影响其他文件，失败原因会写入该文件结果。
+
+长文档会优先使用 PDF 前几页或文档开头内容、疑似目录，并对正文进行有限切片摘要；模型调用受全局 `LLM_MAX_CONCURRENCY` 控制，切片调用默认顺序执行。
+
+### 9.1 请求
+
+```http
+POST /api/v1/document-summaries/extract
+Content-Type: multipart/form-data
+```
+
+表单参数：
+
+| 参数 | 类型 | 必填 | 说明 |
+|---|---|---:|---|
+| files | binary[] | 是 | 多个 DOCX、DOC、PDF、TXT 或 XLSX 文件 |
+
+### 9.2 cURL 示例
+
+```bash
+curl -X POST \
+  "http://127.0.0.1:8000/api/v1/document-summaries/extract" \
+  -H "X-API-Key: your-api-key" \
+  -F "files=@申报书.pdf" \
+  -F "files=@附件说明.docx" \
+  -F "files=@经费预算.xlsx"
+```
+
+### 9.3 成功响应
+
+HTTP 状态码：`200 OK`
+
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": {
+    "summaries": [
+      {
+        "filename": "申报书.pdf",
+        "status": "succeeded",
+        "summary": "本文档主要围绕……",
+        "reason": null,
+        "chars_processed": 18000
+      },
+      {
+        "filename": "经费预算.xlsx",
+        "status": "ignored",
+        "summary": null,
+        "reason": "xlsx 文件已按规则忽略",
+        "chars_processed": null
+      }
+    ]
+  },
+  "request_id": "e0c26072fb8648199777a6852fc62042"
+}
+```
+
+字段说明：
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| data.summaries[].filename | string | 原始文件名 |
+| data.summaries[].status | string | `succeeded`、`ignored` 或 `failed` |
+| data.summaries[].summary | string/null | 生成的文档摘要 |
+| data.summaries[].reason | string/null | 忽略或失败原因 |
+| data.summaries[].chars_processed | integer/null | 从文档中提取并参与处理的文本字符数 |
+
+## 10. Python 调用示例
+
+### 10.1 同步调用
 
 ```python
 import requests
@@ -395,7 +468,7 @@ response.raise_for_status()
 print(response.json()["data"]["draft_reason"])
 ```
 
-### 9.2 异步调用及轮询
+### 10.2 异步调用及轮询
 
 ```python
 import time
@@ -432,4 +505,3 @@ while True:
 
     time.sleep(2)
 ```
-

@@ -1,6 +1,6 @@
 from app.parsers.doc_parser import DocParser
 from app.parsers.docx_parser import DocxParser
+from app.parsers.pdf_parser import PdfParser
 from app.parsers.txt_parser import TxtParser
 
-__all__ = ["DocParser", "DocxParser", "TxtParser"]
-
+__all__ = ["DocParser", "DocxParser", "PdfParser", "TxtParser"]

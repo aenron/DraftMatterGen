@@ -13,14 +13,22 @@ from app.core.errors import ServiceError
 from app.core.logging import configure_logging
 from app.services.draft_reason_service import DraftReasonService
 from app.services.async_job_manager import AsyncJobManager
+from app.services.document_summary_service import DocumentSummaryService
 
 
 def create_app(
-    settings: Settings | None = None, draft_reason_service: DraftReasonService | None = None
+    settings: Settings | None = None,
+    draft_reason_service: DraftReasonService | None = None,
+    document_summary_service: DocumentSummaryService | None = None,
 ) -> FastAPI:
     settings = settings or get_settings()
     configure_logging(settings)
     service = draft_reason_service or DraftReasonService(settings)
+    summary_service = document_summary_service
+    if summary_service is None:
+        document_service = getattr(service, "document_service", None)
+        llm_client = getattr(service, "llm_client", None)
+        summary_service = DocumentSummaryService(settings, document_service, llm_client)
     async_job_manager = AsyncJobManager(settings, service)
 
     @asynccontextmanager
@@ -34,6 +42,7 @@ def create_app(
     app = FastAPI(title=settings.app_name, version="1.1.0", lifespan=lifespan)
     app.state.settings = settings
     app.state.draft_reason_service = service
+    app.state.document_summary_service = summary_service
     app.state.async_job_manager = async_job_manager
 
     @app.middleware("http")
