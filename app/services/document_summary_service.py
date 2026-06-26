@@ -29,6 +29,9 @@ SUMMARY_KEYWORDS = (
 )
 
 
+SUMMARY_PARSEABLE_EXTENSIONS = {"doc", "docx", "pdf", "txt"}
+
+
 class DocumentSummaryService:
     def __init__(
         self,
@@ -37,7 +40,11 @@ class DocumentSummaryService:
         llm_client: LLMClient | None = None,
     ) -> None:
         self.settings = settings
-        self.document_service = document_service or DocumentService(settings)
+        allowed_extensions = settings.summary_allowed_extension_set
+        self.document_service = document_service or DocumentService(
+            settings,
+            allowed_extensions=allowed_extensions & SUMMARY_PARSEABLE_EXTENSIONS,
+        )
         self.llm_client = llm_client or LLMClient(settings)
 
     async def summarize_uploads(self, uploads: list[UploadFile]) -> list[DocumentSummaryItem]:
@@ -58,6 +65,13 @@ class DocumentSummaryService:
     async def _summarize_upload(self, upload: UploadFile) -> DocumentSummaryItem:
         filename = Path(upload.filename or "").name or "unknown"
         suffix = Path(filename).suffix.lower().lstrip(".")
+        if suffix and suffix not in self.settings.summary_allowed_extension_set:
+            await upload.close()
+            return DocumentSummaryItem(
+                filename=filename,
+                status="failed",
+                reason=f"不支持的文件类型: .{suffix}",
+            )
         if suffix == "xlsx":
             await upload.close()
             return DocumentSummaryItem(
@@ -65,7 +79,7 @@ class DocumentSummaryService:
                 status="ignored",
                 reason="xlsx 文件已按规则忽略",
             )
-        if suffix and suffix not in {"doc", "docx", "pdf", "txt"}:
+        if suffix and suffix not in SUMMARY_PARSEABLE_EXTENSIONS:
             await upload.close()
             return DocumentSummaryItem(
                 filename=filename,

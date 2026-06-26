@@ -45,6 +45,40 @@ def test_ignores_xlsx(tmp_path: Path) -> None:
     assert result.reason == "xlsx 文件已按规则忽略"
 
 
+def test_rejects_xlsx_when_summary_allowed_extensions_excludes_it(tmp_path: Path) -> None:
+    settings = Settings(
+        APP_ENV="test",
+        LLM_BASE_URL="http://llm.test/v1",
+        LLM_MODEL="test-model",
+        TEMP_DIR=tmp_path,
+        SUMMARY_ALLOWED_EXTENSIONS="docx,doc,pdf,txt",
+    )
+    service = DocumentSummaryService(settings)
+    upload = UploadFile(filename="budget.xlsx", file=BytesIO(b"content"))
+
+    result = asyncio.run(service.summarize_uploads([upload]))[0]
+
+    assert result.status == "failed"
+    assert result.reason == "不支持的文件类型: .xlsx"
+
+
+def test_summary_uses_summary_allowed_extensions_instead_of_global_allowed_extensions(
+    tmp_path: Path,
+) -> None:
+    settings = Settings(
+        APP_ENV="test",
+        LLM_BASE_URL="http://llm.test/v1",
+        LLM_MODEL="test-model",
+        TEMP_DIR=tmp_path,
+        ALLOWED_EXTENSIONS="docx,doc,txt",
+        SUMMARY_ALLOWED_EXTENSIONS="docx,doc,pdf,txt",
+    )
+    service = DocumentSummaryService(settings)
+
+    assert "pdf" in service.document_service.allowed_extensions
+    assert "pdf" not in settings.allowed_extension_set
+
+
 def test_long_document_is_chunked_and_merged(tmp_path: Path) -> None:
     text = "\n".join(
         [

@@ -26,8 +26,9 @@ class ParsedDocument:
 
 
 class DocumentService:
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, allowed_extensions: set[str] | None = None) -> None:
         self.settings = settings
+        self.allowed_extensions = allowed_extensions or settings.allowed_extension_set
         docx_parser = DocxParser()
         pdf_parser = PdfParser()
         self.parsers = {
@@ -49,7 +50,7 @@ class DocumentService:
         if not filename or not suffix:
             await upload.close()
             raise ServiceError(400, "INVALID_FILENAME", "文件名或扩展名无效")
-        if suffix not in self.settings.allowed_extension_set or suffix not in self.parsers:
+        if suffix not in self.allowed_extensions or suffix not in self.parsers:
             await upload.close()
             raise ServiceError(415, "UNSUPPORTED_FILE_TYPE", f"不支持的文件类型: .{suffix}")
 

@@ -37,7 +37,10 @@ class Settings(BaseSettings):
     upload_max_mb: int = Field(20, gt=0, validation_alias="UPLOAD_MAX_MB")
     extract_max_chars: int = Field(50_000, gt=1000, validation_alias="EXTRACT_MAX_CHARS")
     max_document_chunks: int = Field(8, gt=0, le=50, validation_alias="MAX_DOCUMENT_CHUNKS")
-    allowed_extensions: str = Field("docx,doc,txt,pdf,xlsx", validation_alias="ALLOWED_EXTENSIONS")
+    allowed_extensions: str = Field("docx,doc,txt", validation_alias="ALLOWED_EXTENSIONS")
+    summary_allowed_extensions: str = Field(
+        "docx,doc,pdf,txt,xlsx", validation_alias="SUMMARY_ALLOWED_EXTENSIONS"
+    )
     temp_dir: Path = Field(Path("/tmp/draft-reason"), validation_alias="TEMP_DIR")
     libreoffice_binary: str = Field("libreoffice", validation_alias="LIBREOFFICE_BINARY")
     conversion_timeout_seconds: float = Field(
@@ -85,6 +88,14 @@ class Settings(BaseSettings):
         return {
             value.strip().lower().lstrip(".")
             for value in self.allowed_extensions.split(",")
+            if value.strip()
+        }
+
+    @property
+    def summary_allowed_extension_set(self) -> set[str]:
+        return {
+            value.strip().lower().lstrip(".")
+            for value in self.summary_allowed_extensions.split(",")
             if value.strip()
         }
 

@@ -35,6 +35,18 @@ X-API-Key: your-api-key
 
 未启用鉴权时不需要传递该请求头。
 
+### 2.1 文件类型配置
+
+拟稿事由接口和文档摘要接口使用不同的环境变量控制允许的文件类型：
+
+```dotenv
+# 拟稿事由接口
+ALLOWED_EXTENSIONS=docx,doc,txt
+
+# 文档摘要接口；xlsx 允许时会按规则忽略，不进入摘要处理
+SUMMARY_ALLOWED_EXTENSIONS=docx,doc,pdf,txt,xlsx
+```
+
 ## 3. 通用约定
 
 ### 3.1 请求 ID
