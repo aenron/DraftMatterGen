@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 import re
 import shutil
 import sqlite3
@@ -7,10 +8,11 @@ import time
 import uuid
 from contextlib import closing
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import UploadFile
 from loguru import logger
@@ -22,6 +24,17 @@ from app.services.document_summary_service import (
     SUMMARY_PARSEABLE_EXTENSIONS,
     DocumentSummaryService,
 )
+
+
+DEFAULT_TIMEZONE = "Asia/Shanghai"
+
+
+def current_datetime() -> datetime:
+    timezone_name = os.getenv("TZ", DEFAULT_TIMEZONE)
+    try:
+        return datetime.now(ZoneInfo(timezone_name))
+    except ZoneInfoNotFoundError:
+        return datetime.now().astimezone()
 
 
 class JobStatus(StrEnum):
@@ -158,7 +171,7 @@ class SQLiteJobStore:
         return [self._row_to_record(row) for row in rows]
 
     def mark_processing(self, job_id: str) -> JobRecord | None:
-        now = datetime.now(timezone.utc)
+        now = current_datetime()
         with closing(self._connect()) as connection, connection:
             cursor = connection.execute(
                 """
@@ -182,7 +195,7 @@ class SQLiteJobStore:
         return self._row_to_record(row)
 
     def mark_succeeded(self, job_id: str, result: dict[str, Any]) -> None:
-        now = datetime.now(timezone.utc)
+        now = current_datetime()
         with closing(self._connect()) as connection, connection:
             connection.execute(
                 """
@@ -201,7 +214,7 @@ class SQLiteJobStore:
             )
 
     def mark_failed(self, job_id: str, code: str, message: str) -> None:
-        now = datetime.now(timezone.utc)
+        now = current_datetime()
         with closing(self._connect()) as connection, connection:
             connection.execute(
                 """
@@ -390,7 +403,7 @@ class AsyncJobManager:
             file_path=file_path,
             request_id=request_id,
             status=JobStatus.QUEUED,
-            submitted_at=datetime.now(timezone.utc),
+            submitted_at=current_datetime(),
             updated_at=time.time(),
         )
         try:
@@ -470,7 +483,7 @@ class AsyncJobManager:
             file_path=job_dir,
             request_id=request_id,
             status=JobStatus.QUEUED,
-            submitted_at=datetime.now(timezone.utc),
+            submitted_at=current_datetime(),
             updated_at=time.time(),
         )
         try:

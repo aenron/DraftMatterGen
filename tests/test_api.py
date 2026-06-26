@@ -198,6 +198,29 @@ def test_document_summary_async_success(tmp_path: Path) -> None:
         assert not (tmp_path / "async-data" / "summary-jobs.db").exists()
 
 
+def test_document_summary_async_times_use_service_timezone(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("TZ", "Asia/Shanghai")
+    with make_client(tmp_path, summary_service=FakeDocumentSummaryService()) as client:
+        submitted = client.post(
+            "/api/v1/document-summaries/extract-async",
+            files=[("files", ("sample.txt", b"test", "text/plain"))],
+        ).json()["data"]
+
+        body = None
+        for _ in range(50):
+            body = client.get(
+                f"/api/v1/document-summaries/jobs/{submitted['job_id']}"
+            ).json()["data"]
+            if body["status"] in {"succeeded", "failed"}:
+                break
+            time.sleep(0.01)
+
+        assert body is not None
+        assert body["submitted_at"].endswith("+08:00")
+        assert body["started_at"].endswith("+08:00")
+        assert body["completed_at"].endswith("+08:00")
+
+
 def test_async_job_query_endpoints_are_type_isolated(tmp_path: Path) -> None:
     with make_client(tmp_path, summary_service=FakeDocumentSummaryService()) as client:
         summary_job = client.post(
