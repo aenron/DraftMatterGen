@@ -26,9 +26,8 @@ def create_app(
     service = draft_reason_service or DraftReasonService(settings)
     summary_service = document_summary_service
     if summary_service is None:
-        document_service = getattr(service, "document_service", None)
         llm_client = getattr(service, "llm_client", None)
-        summary_service = DocumentSummaryService(settings, document_service, llm_client)
+        summary_service = DocumentSummaryService(settings, llm_client=llm_client)
     async_job_manager = AsyncJobManager(settings, service)
 
     @asynccontextmanager

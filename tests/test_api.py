@@ -9,6 +9,7 @@ from app.core.config import Settings
 from app.core.errors import ServiceError
 from app.main import create_app
 from app.api.schemas import DocumentSummaryItem
+from app.services.draft_reason_service import DraftReasonService
 
 
 class FakeDraftReasonService:
@@ -136,6 +137,22 @@ def test_document_summary_multi_file(tmp_path: Path) -> None:
     assert body["data"]["summaries"][0]["summary"] == "摘要：sample.txt"
     assert body["data"]["summaries"][1]["status"] == "ignored"
     assert body["data"]["summaries"][1]["summary"] is None
+
+
+def test_document_summary_service_uses_its_own_allowed_extensions(tmp_path: Path) -> None:
+    settings = Settings(
+        APP_ENV="test",
+        LLM_BASE_URL="http://llm.test/v1",
+        LLM_MODEL="test-model",
+        TEMP_DIR=tmp_path,
+        ASYNC_DATA_DIR=tmp_path / "async-data",
+        ALLOWED_EXTENSIONS="docx,doc,txt",
+        SUMMARY_ALLOWED_EXTENSIONS="docx,doc,pdf,txt,xlsx",
+    )
+    app = create_app(settings, DraftReasonService(settings))
+
+    assert "pdf" not in app.state.draft_reason_service.document_service.allowed_extensions
+    assert "pdf" in app.state.document_summary_service.document_service.allowed_extensions
 
 
 def test_health(tmp_path: Path) -> None:
