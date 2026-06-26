@@ -32,9 +32,20 @@ DEFAULT_TIMEZONE = "Asia/Shanghai"
 def current_datetime() -> datetime:
     timezone_name = os.getenv("TZ", DEFAULT_TIMEZONE)
     try:
-        return datetime.now(ZoneInfo(timezone_name))
+        return datetime.now(ZoneInfo(timezone_name)).replace(tzinfo=None)
     except ZoneInfoNotFoundError:
-        return datetime.now().astimezone()
+        return datetime.now().astimezone().replace(tzinfo=None)
+
+
+def parse_datetime(value: str) -> datetime:
+    parsed = datetime.fromisoformat(value)
+    if parsed.tzinfo is None:
+        return parsed
+    timezone_name = os.getenv("TZ", DEFAULT_TIMEZONE)
+    try:
+        return parsed.astimezone(ZoneInfo(timezone_name)).replace(tzinfo=None)
+    except ZoneInfoNotFoundError:
+        return parsed.astimezone().replace(tzinfo=None)
 
 
 class JobStatus(StrEnum):
@@ -290,10 +301,10 @@ class SQLiteJobStore:
             file_path=Path(row["file_path"]),
             request_id=row["request_id"],
             status=JobStatus(row["status"]),
-            submitted_at=datetime.fromisoformat(row["submitted_at"]),
-            started_at=datetime.fromisoformat(row["started_at"]) if row["started_at"] else None,
+            submitted_at=parse_datetime(row["submitted_at"]),
+            started_at=parse_datetime(row["started_at"]) if row["started_at"] else None,
             completed_at=(
-                datetime.fromisoformat(row["completed_at"]) if row["completed_at"] else None
+                parse_datetime(row["completed_at"]) if row["completed_at"] else None
             ),
             updated_at=row["updated_at"],
             result=result,

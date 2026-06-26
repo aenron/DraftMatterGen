@@ -261,8 +261,8 @@ HTTP 状态码：`200 OK`
   "data": {
     "job_id": "a73cd05ff07f4d18bb4e0f7758255ec4",
     "status": "processing",
-    "submitted_at": "2026-06-24T10:10:00.000000+08:00",
-    "started_at": "2026-06-24T10:10:00.120000+08:00",
+    "submitted_at": "2026-06-24T10:10:00.000000",
+    "started_at": "2026-06-24T10:10:00.120000",
     "completed_at": null,
     "result": null,
     "error": null
@@ -282,9 +282,9 @@ HTTP 状态码：`200 OK`
   "data": {
     "job_id": "a73cd05ff07f4d18bb4e0f7758255ec4",
     "status": "succeeded",
-    "submitted_at": "2026-06-24T10:10:00.000000+08:00",
-    "started_at": "2026-06-24T10:10:00.120000+08:00",
-    "completed_at": "2026-06-24T10:10:01.708000+08:00",
+    "submitted_at": "2026-06-24T10:10:00.000000",
+    "started_at": "2026-06-24T10:10:00.120000",
+    "completed_at": "2026-06-24T10:10:01.708000",
     "result": {
       "draft_reason": "为保障三地院区气体灭火系统的稳定运行，我办拟与原服务商续签维保服务合同。报院部阅示。",
       "filename": "样例1.docx",
@@ -307,9 +307,9 @@ HTTP 状态码：`200 OK`
   "data": {
     "job_id": "a73cd05ff07f4d18bb4e0f7758255ec4",
     "status": "failed",
-    "submitted_at": "2026-06-24T10:10:00.000000+08:00",
-    "started_at": "2026-06-24T10:10:00.120000+08:00",
-    "completed_at": "2026-06-24T10:11:00.120000+08:00",
+    "submitted_at": "2026-06-24T10:10:00.000000",
+    "started_at": "2026-06-24T10:10:00.120000",
+    "completed_at": "2026-06-24T10:11:00.120000",
     "result": null,
     "error": {
       "code": "LLM_TIMEOUT",
@@ -517,9 +517,9 @@ GET /api/v1/document-summaries/jobs/{job_id}
   "data": {
     "job_id": "b42d3c24e7cc48cfb2123d68ab2c7bf4",
     "status": "succeeded",
-    "submitted_at": "2026-06-26T10:10:00.000000+08:00",
-    "started_at": "2026-06-26T10:10:00.120000+08:00",
-    "completed_at": "2026-06-26T10:10:03.708000+08:00",
+    "submitted_at": "2026-06-26T10:10:00.000000",
+    "started_at": "2026-06-26T10:10:00.120000",
+    "completed_at": "2026-06-26T10:10:03.708000",
     "result": {
       "summaries": [
         {
