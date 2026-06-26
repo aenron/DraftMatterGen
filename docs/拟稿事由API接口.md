@@ -210,6 +210,7 @@ HTTP 状态码：`202 Accepted`
 | data.status_url | string | 任务状态查询地址 |
 
 异步任务状态和源文件使用 SQLite 及持久化目录保存。服务重启后，未完成任务会重新进入队列。
+拟稿事由异步接口和文档摘要异步接口共用同一个异步任务队列、同一组 worker 和同一个任务库，通过任务类型区分处理逻辑。
 
 ## 6. 查询异步任务
 
@@ -457,9 +458,88 @@ HTTP 状态码：`200 OK`
 | data.summaries[].reason | string/null | 忽略或失败原因 |
 | data.summaries[].chars_processed | integer/null | 从文档中提取并参与处理的文本字符数 |
 
-## 10. Python 调用示例
+## 10. 异步文档摘要生成
 
-### 10.1 同步调用
+文件持久化完成后立即返回任务 ID，不等待文档解析和模型摘要完成。
+该接口与拟稿事由异步接口共用 `ASYNC_QUEUE_MAX_SIZE`、`ASYNC_WORKER_COUNT`、`ASYNC_JOB_TTL_SECONDS` 和 `ASYNC_DATA_DIR` 配置。
+
+### 10.1 请求
+
+```http
+POST /api/v1/document-summaries/extract-async
+Content-Type: multipart/form-data
+```
+
+表单参数：
+
+| 参数 | 类型 | 必填 | 说明 |
+|---|---|---:|---|
+| files | binary[] | 是 | 多个 DOCX、DOC、PDF、TXT 或 XLSX 文件 |
+
+### 10.2 cURL 示例
+
+```bash
+curl -X POST \
+  "http://127.0.0.1:8000/api/v1/document-summaries/extract-async" \
+  -H "X-API-Key: your-api-key" \
+  -F "files=@申报书.pdf" \
+  -F "files=@附件说明.docx" \
+  -F "files=@经费预算.xlsx"
+```
+
+成功响应：
+
+```json
+{
+  "code": 202,
+  "message": "accepted",
+  "data": {
+    "job_id": "b42d3c24e7cc48cfb2123d68ab2c7bf4",
+    "status": "queued",
+    "status_url": "http://127.0.0.1:8000/api/v1/document-summaries/jobs/b42d3c24e7cc48cfb2123d68ab2c7bf4"
+  },
+  "request_id": "e0c26072fb8648199777a6852fc62042"
+}
+```
+
+### 10.3 查询任务
+
+```http
+GET /api/v1/document-summaries/jobs/{job_id}
+```
+
+成功完成时，`data.result.summaries` 与同步摘要接口的 `data.summaries` 结构一致。
+
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": {
+    "job_id": "b42d3c24e7cc48cfb2123d68ab2c7bf4",
+    "status": "succeeded",
+    "submitted_at": "2026-06-26T02:10:00.000000Z",
+    "started_at": "2026-06-26T02:10:00.120000Z",
+    "completed_at": "2026-06-26T02:10:03.708000Z",
+    "result": {
+      "summaries": [
+        {
+          "filename": "申报书.pdf",
+          "status": "succeeded",
+          "summary": "本文档主要围绕……",
+          "reason": null,
+          "chars_processed": 18000
+        }
+      ]
+    },
+    "error": null
+  },
+  "request_id": "1c55f958ebf44bb096f31f14c8d84b3d"
+}
+```
+
+## 11. Python 调用示例
+
+### 11.1 同步调用
 
 ```python
 import requests
@@ -480,7 +560,7 @@ response.raise_for_status()
 print(response.json()["data"]["draft_reason"])
 ```
 
-### 10.2 异步调用及轮询
+### 11.2 异步调用及轮询
 
 ```python
 import time

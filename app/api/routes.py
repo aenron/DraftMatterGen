@@ -8,6 +8,8 @@ from app.api.schemas import (
     AsyncJobResponse,
     AsyncJobSubmissionData,
     AsyncJobSubmissionResponse,
+    DocumentSummaryAsyncJobData,
+    DocumentSummaryAsyncJobResponse,
     DocumentSummaryData,
     DocumentSummaryResponse,
     DraftReasonData,
@@ -15,6 +17,7 @@ from app.api.schemas import (
     HealthResponse,
 )
 from app.core.errors import ServiceError
+from app.services.async_job_manager import JobType
 
 
 router = APIRouter()
@@ -70,6 +73,49 @@ async def extract_document_summaries(
 
 
 @router.post(
+    "/api/v1/document-summaries/extract-async",
+    response_model=AsyncJobSubmissionResponse,
+    status_code=202,
+)
+async def submit_document_summary_job(
+    request: Request,
+    files: list[UploadFile] = File(...),
+    x_api_key: str | None = Header(None, alias="X-API-Key"),
+) -> AsyncJobSubmissionResponse:
+    _check_api_key(request, x_api_key)
+    request.state.filename = ",".join(Path(file.filename or "").name or "-" for file in files)
+    record = await request.app.state.async_job_manager.submit_document_summary(
+        files, request.state.request_id
+    )
+    status_url = str(request.url_for("get_document_summary_job", job_id=record.job_id))
+    return AsyncJobSubmissionResponse(
+        data=AsyncJobSubmissionData(
+            job_id=record.job_id,
+            status=record.status,
+            status_url=status_url,
+        ),
+        request_id=request.state.request_id,
+    )
+
+
+@router.get(
+    "/api/v1/document-summaries/jobs/{job_id}",
+    response_model=DocumentSummaryAsyncJobResponse,
+)
+async def get_document_summary_job(
+    job_id: str,
+    request: Request,
+    x_api_key: str | None = Header(None, alias="X-API-Key"),
+) -> DocumentSummaryAsyncJobResponse:
+    _check_api_key(request, x_api_key)
+    snapshot = await request.app.state.async_job_manager.get(job_id, JobType.DOCUMENT_SUMMARY)
+    return DocumentSummaryAsyncJobResponse(
+        data=DocumentSummaryAsyncJobData.model_validate(snapshot),
+        request_id=request.state.request_id,
+    )
+
+
+@router.post(
     "/api/v1/draft-reasons/extract-async",
     response_model=AsyncJobSubmissionResponse,
     status_code=202,
@@ -103,7 +149,7 @@ async def get_draft_reason_job(
     x_api_key: str | None = Header(None, alias="X-API-Key"),
 ) -> AsyncJobResponse:
     _check_api_key(request, x_api_key)
-    snapshot = await request.app.state.async_job_manager.get(job_id)
+    snapshot = await request.app.state.async_job_manager.get(job_id, JobType.DRAFT_REASON)
     return AsyncJobResponse(
         data=AsyncJobData.model_validate(snapshot),
         request_id=request.state.request_id,

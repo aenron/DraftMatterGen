@@ -73,3 +73,20 @@ class AsyncJobResponse(BaseModel):
     message: str = "success"
     data: AsyncJobData
     request_id: str
+
+
+class DocumentSummaryAsyncJobData(BaseModel):
+    job_id: str
+    status: str
+    submitted_at: datetime
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    result: DocumentSummaryData | None = None
+    error: AsyncJobError | None = None
+
+
+class DocumentSummaryAsyncJobResponse(BaseModel):
+    code: int = 200
+    message: str = "success"
+    data: DocumentSummaryAsyncJobData
+    request_id: str

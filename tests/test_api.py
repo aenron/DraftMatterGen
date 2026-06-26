@@ -1,6 +1,8 @@
 import asyncio
+from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
+import sqlite3
 import time
 
 from fastapi.testclient import TestClient
@@ -9,6 +11,7 @@ from app.core.config import Settings
 from app.core.errors import ServiceError
 from app.main import create_app
 from app.api.schemas import DocumentSummaryItem
+from app.services.async_job_manager import JobType, SQLiteJobStore
 from app.services.draft_reason_service import DraftReasonService
 
 
@@ -153,6 +156,112 @@ def test_document_summary_service_uses_its_own_allowed_extensions(tmp_path: Path
 
     assert "pdf" not in app.state.draft_reason_service.document_service.allowed_extensions
     assert "pdf" in app.state.document_summary_service.document_service.allowed_extensions
+
+
+def test_document_summary_async_success(tmp_path: Path) -> None:
+    with make_client(tmp_path, summary_service=FakeDocumentSummaryService()) as client:
+        submitted = client.post(
+            "/api/v1/document-summaries/extract-async",
+            files=[
+                ("files", ("sample.txt", b"test", "text/plain")),
+                (
+                    "files",
+                    (
+                        "budget.xlsx",
+                        b"ignored",
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    ),
+                ),
+            ],
+        )
+        assert submitted.status_code == 202
+        assert submitted.json()["code"] == 202
+        submission = submitted.json()["data"]
+        assert submission["status"] == "queued"
+        assert submission["job_id"] in submission["status_url"]
+
+        body = None
+        for _ in range(50):
+            response = client.get(f"/api/v1/document-summaries/jobs/{submission['job_id']}")
+            body = response.json()["data"]
+            if body["status"] in {"succeeded", "failed"}:
+                break
+            time.sleep(0.01)
+
+        assert body is not None
+        assert body["status"] == "succeeded"
+        assert body["result"]["summaries"][0]["status"] == "succeeded"
+        assert body["result"]["summaries"][0]["summary"] == "摘要：sample.txt"
+        assert body["result"]["summaries"][1]["status"] == "ignored"
+        assert body["error"] is None
+        assert (tmp_path / "async-data" / "jobs.db").exists()
+        assert not (tmp_path / "async-data" / "summary-jobs.db").exists()
+
+
+def test_async_job_query_endpoints_are_type_isolated(tmp_path: Path) -> None:
+    with make_client(tmp_path, summary_service=FakeDocumentSummaryService()) as client:
+        summary_job = client.post(
+            "/api/v1/document-summaries/extract-async",
+            files=[("files", ("sample.txt", b"test", "text/plain"))],
+        ).json()["data"]["job_id"]
+        draft_job = client.post(
+            "/api/v1/draft-reasons/extract-async",
+            files={"file": ("sample.txt", b"test", "text/plain")},
+        ).json()["data"]["job_id"]
+
+        wrong_summary_lookup = client.get(f"/api/v1/draft-reasons/jobs/{summary_job}")
+        wrong_draft_lookup = client.get(f"/api/v1/document-summaries/jobs/{draft_job}")
+
+        assert wrong_summary_lookup.status_code == 404
+        assert wrong_draft_lookup.status_code == 404
+
+
+def test_async_job_store_migrates_old_jobs_table(tmp_path: Path) -> None:
+    db_path = tmp_path / "jobs.db"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    submitted_at = datetime.now(timezone.utc).isoformat()
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            """
+            CREATE TABLE jobs (
+                job_id TEXT PRIMARY KEY,
+                filename TEXT NOT NULL,
+                file_path TEXT NOT NULL,
+                request_id TEXT NOT NULL,
+                status TEXT NOT NULL,
+                submitted_at TEXT NOT NULL,
+                started_at TEXT,
+                completed_at TEXT,
+                updated_at REAL NOT NULL,
+                result_json TEXT,
+                error_code TEXT,
+                error_message TEXT
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO jobs (
+                job_id, filename, file_path, request_id, status, submitted_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "old-job",
+                "sample.txt",
+                str(tmp_path / "input.txt"),
+                "request-id",
+                "queued",
+                submitted_at,
+                time.time(),
+            ),
+        )
+
+    store = SQLiteJobStore(db_path)
+    store.initialize()
+    record = store.get("old-job")
+
+    assert record is not None
+    assert record.job_type == JobType.DRAFT_REASON
 
 
 def test_health(tmp_path: Path) -> None:

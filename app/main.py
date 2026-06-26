@@ -28,7 +28,7 @@ def create_app(
     if summary_service is None:
         llm_client = getattr(service, "llm_client", None)
         summary_service = DocumentSummaryService(settings, llm_client=llm_client)
-    async_job_manager = AsyncJobManager(settings, service)
+    async_job_manager = AsyncJobManager(settings, service, summary_service)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
