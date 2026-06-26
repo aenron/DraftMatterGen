@@ -16,6 +16,9 @@ from app.prompts.document_summary import (
 )
 
 
+LOG_PREVIEW_CHARS = 600
+
+
 class LLMClient:
     def __init__(
         self,
@@ -106,7 +109,33 @@ class LLMClient:
                             "LLM_REQUEST_REJECTED",
                             f"LLM 服务拒绝请求，状态码 {response.status_code}",
                         )
-                    result = self._decode_response_json(response.json())
+                    try:
+                        response_payload = response.json()
+                    except json.JSONDecodeError as exc:
+                        last_error = exc
+                        logger.warning(
+                            "⚠️ 模型HTTP响应不是JSON | 模型={} | 第{}次 | 状态={} | Content-Type={} | 响应预览={}",
+                            self.settings.llm_model,
+                            attempt + 1,
+                            response.status_code,
+                            response.headers.get("content-type", ""),
+                            self._preview(response.text),
+                        )
+                        if attempt < self.settings.llm_max_retries:
+                            await asyncio.sleep(min(0.5 * (2**attempt), 2.0))
+                            continue
+                        raise
+
+                    try:
+                        result = self._decode_response_json(response_payload)
+                    except (ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
+                        last_error = exc
+                        self._log_invalid_llm_payload(response_payload, exc, attempt + 1)
+                        if attempt < self.settings.llm_max_retries:
+                            await asyncio.sleep(min(0.5 * (2**attempt), 2.0))
+                            continue
+                        raise
+
                     logger.debug(
                         "llm_request_completed model={} status={} result_chars={} duration_ms={:.2f}",
                         self.settings.llm_model,
@@ -129,17 +158,8 @@ class LLMClient:
                     if attempt < self.settings.llm_max_retries:
                         await asyncio.sleep(min(0.5 * (2**attempt), 2.0))
                         continue
-                except (ValueError, KeyError, TypeError) as exc:
+                except (ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
                     last_error = exc
-                    if attempt < self.settings.llm_max_retries:
-                        logger.warning(
-                            "⚠️ 模型响应格式无效，准备重试 | 模型={} | 第{}次 | 异常={}",
-                            self.settings.llm_model,
-                            attempt + 1,
-                            type(exc).__name__,
-                        )
-                        await asyncio.sleep(min(0.5 * (2**attempt), 2.0))
-                        continue
                     logger.debug(
                         "llm_invalid_response model={} error_type={}",
                         self.settings.llm_model,
@@ -196,3 +216,36 @@ class LLMClient:
                     return parsed
 
         raise json.JSONDecodeError("No JSON object found", content, 0)
+
+    def _log_invalid_llm_payload(
+        self,
+        payload: dict[str, Any],
+        exc: Exception,
+        attempt: int,
+    ) -> None:
+        content: Any = None
+        finish_reason: Any = None
+        try:
+            choice = payload["choices"][0]
+            finish_reason = choice.get("finish_reason")
+            content = choice["message"].get("content")
+        except (KeyError, IndexError, TypeError, AttributeError):
+            pass
+
+        logger.warning(
+            "⚠️ 模型消息内容不是有效JSON | 模型={} | 第{}次 | 异常={} | finish_reason={} | content_type={} | content_preview={} | payload_keys={}",
+            self.settings.llm_model,
+            attempt,
+            type(exc).__name__,
+            finish_reason,
+            type(content).__name__,
+            self._preview(content) if isinstance(content, str) else "",
+            ",".join(payload.keys()),
+        )
+
+    @staticmethod
+    def _preview(value: str, limit: int = LOG_PREVIEW_CHARS) -> str:
+        value = value.replace("\r", "\\r").replace("\n", "\\n")
+        if len(value) <= limit:
+            return value
+        return value[:limit] + "...<truncated>"
