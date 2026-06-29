@@ -2,6 +2,7 @@ import secrets
 from pathlib import Path
 
 from fastapi import APIRouter, File, Header, Query, Request, UploadFile
+from loguru import logger
 
 from app.api.schemas import (
     AsyncJobData,
@@ -42,7 +43,11 @@ async def extract_draft_reason(
     x_api_key: str | None = Header(None, alias="X-API-Key"),
 ) -> DraftReasonResponse:
     _check_api_key(request, x_api_key)
-    reason, filename, chars = await request.app.state.draft_reason_service.extract_from_upload(file)
+    upload_filename = Path(file.filename or "").name or "-"
+    with logger.contextualize(filename=upload_filename):
+        reason, filename, chars = (
+            await request.app.state.draft_reason_service.extract_from_upload(file)
+        )
     request.state.filename = filename
     request.state.source_chars = chars
     request.state.result_chars = len(reason)
@@ -64,7 +69,8 @@ async def extract_document_summaries(
 ) -> DocumentSummaryResponse:
     _check_api_key(request, x_api_key)
     request.state.filename = ",".join(Path(file.filename or "").name or "-" for file in files)
-    summaries = await request.app.state.document_summary_service.summarize_uploads(files)
+    with logger.contextualize(filename=request.state.filename):
+        summaries = await request.app.state.document_summary_service.summarize_uploads(files)
     request.state.result_chars = sum(len(item.summary or "") for item in summaries)
     return DocumentSummaryResponse(
         data=DocumentSummaryData(summaries=summaries),
@@ -84,9 +90,10 @@ async def submit_document_summary_job(
 ) -> AsyncJobSubmissionResponse:
     _check_api_key(request, x_api_key)
     request.state.filename = ",".join(Path(file.filename or "").name or "-" for file in files)
-    record = await request.app.state.async_job_manager.submit_document_summary(
-        files, request.state.request_id
-    )
+    with logger.contextualize(filename=request.state.filename):
+        record = await request.app.state.async_job_manager.submit_document_summary(
+            files, request.state.request_id
+        )
     status_url = str(request.url_for("get_document_summary_job", job_id=record.job_id))
     return AsyncJobSubmissionResponse(
         data=AsyncJobSubmissionData(
@@ -127,7 +134,10 @@ async def submit_draft_reason_job(
 ) -> AsyncJobSubmissionResponse:
     _check_api_key(request, x_api_key)
     request.state.filename = Path(file.filename or "").name or "-"
-    record = await request.app.state.async_job_manager.submit(file, request.state.request_id)
+    with logger.contextualize(filename=request.state.filename):
+        record = await request.app.state.async_job_manager.submit(
+            file, request.state.request_id
+        )
     status_url = str(request.url_for("get_draft_reason_job", job_id=record.job_id))
     return AsyncJobSubmissionResponse(
         data=AsyncJobSubmissionData(

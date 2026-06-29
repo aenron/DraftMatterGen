@@ -16,6 +16,34 @@ from app.services.async_job_manager import AsyncJobManager
 from app.services.document_summary_service import DocumentSummaryService
 
 
+def _request_log_context(path: str) -> dict[str, str]:
+    if path.startswith("/api/v1/draft-reasons"):
+        business = "draft_reason"
+    elif path.startswith("/api/v1/document-summaries"):
+        business = "document_summary"
+    else:
+        business = "-"
+
+    if "/jobs/" in path:
+        mode = "async_status"
+        job_id = path.rsplit("/", 1)[-1] or "-"
+    elif path.endswith("/extract-async"):
+        mode = "async_submit"
+        job_id = "-"
+    elif path.endswith("/extract"):
+        mode = "sync"
+        job_id = "-"
+    else:
+        mode = "-"
+        job_id = "-"
+    return {
+        "business": business,
+        "mode": mode,
+        "job_id": job_id,
+        "filename": "-",
+    }
+
+
 def create_app(
     settings: Settings | None = None,
     draft_reason_service: DraftReasonService | None = None,
@@ -48,7 +76,10 @@ def create_app(
     async def request_context(request: Request, call_next):
         request.state.request_id = request.headers.get("X-Request-ID") or uuid.uuid4().hex
         started_at = time.perf_counter()
-        with logger.contextualize(request_id=request.state.request_id):
+        with logger.contextualize(
+            request_id=request.state.request_id,
+            **_request_log_context(request.url.path),
+        ):
             logger.debug(
                 "request_started method={} path={} client={}",
                 request.method,

@@ -546,7 +546,13 @@ class AsyncJobManager:
     async def _process_draft_reason(self, record: JobRecord, worker_number: int) -> None:
         started_at = time.perf_counter()
         delete_source = False
-        with logger.contextualize(request_id=record.request_id):
+        with logger.contextualize(
+            request_id=record.request_id,
+            business=JobType.DRAFT_REASON.value,
+            mode="async_worker",
+            job_id=record.job_id,
+            filename=record.filename,
+        ):
             logger.info(
                 "▶️ 异步任务开始 | 任务={} | worker={} | 文件名={}",
                 record.job_id,
@@ -603,7 +609,13 @@ class AsyncJobManager:
     async def _process_document_summary(self, record: JobRecord, worker_number: int) -> None:
         started_at = time.perf_counter()
         delete_source = False
-        with logger.contextualize(request_id=record.request_id):
+        with logger.contextualize(
+            request_id=record.request_id,
+            business=JobType.DOCUMENT_SUMMARY.value,
+            mode="async_worker",
+            job_id=record.job_id,
+            filename=record.filename,
+        ):
             logger.info(
                 "▶️ 文档摘要异步任务开始 | 任务={} | worker={} | 文件名={}",
                 record.job_id,
