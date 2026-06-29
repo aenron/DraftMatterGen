@@ -17,6 +17,19 @@ from app.prompts.document_summary import (
 
 
 LOG_PREVIEW_CHARS = 600
+LOG_RESPONSE_HEAD_CHARS = 60
+LOG_RESPONSE_TAIL_CHARS = 60
+DIAGNOSTIC_RESPONSE_HEADERS = (
+    "content-length",
+    "transfer-encoding",
+    "server",
+    "date",
+    "x-request-id",
+    "x-correlation-id",
+    "traceparent",
+    "x-envoy-upstream-service-time",
+    "x-openai-request-id",
+)
 
 
 class LLMClient:
@@ -114,12 +127,24 @@ class LLMClient:
                     except json.JSONDecodeError as exc:
                         last_error = exc
                         logger.warning(
-                            "⚠️ 模型HTTP响应不是JSON | 模型={} | 第{}次 | 状态={} | Content-Type={} | 响应预览={}",
+                            "⚠️ 模型HTTP响应不是JSON | 模型={} | 第{}次 | URL={} | 状态={} | "
+                            "HTTP版本={} | Content-Type={} | 编码={} | body_bytes={} | "
+                            "JSON错误=行{}列{}位置{}:{} | 响应头={} | 耗时={:.2f}s | 响应首尾={}",
                             self.settings.llm_model,
                             attempt + 1,
+                            response.request.url.copy_with(query=None),
                             response.status_code,
+                            response.http_version or "unknown",
                             response.headers.get("content-type", ""),
-                            self._preview(response.text),
+                            response.encoding or "unknown",
+                            len(response.content),
+                            exc.lineno,
+                            exc.colno,
+                            exc.pos,
+                            exc.msg,
+                            self._diagnostic_headers(response),
+                            time.perf_counter() - started_at,
+                            self._response_preview(response),
                         )
                         if attempt < self.settings.llm_max_retries:
                             await asyncio.sleep(min(0.5 * (2**attempt), 2.0))
@@ -249,3 +274,28 @@ class LLMClient:
         if len(value) <= limit:
             return value
         return value[:limit] + "...<truncated>"
+
+    @staticmethod
+    def _response_preview(response: httpx.Response) -> str:
+        if not response.content:
+            return "<empty>"
+        text = response.text
+        if text:
+            escaped = text.replace("\r", "\\r").replace("\n", "\\n")
+            if len(escaped) <= LOG_RESPONSE_HEAD_CHARS + LOG_RESPONSE_TAIL_CHARS:
+                return f"<full>{escaped}"
+            return (
+                f"<head>{escaped[:LOG_RESPONSE_HEAD_CHARS]}"
+                f"...<truncated {len(escaped) - LOG_RESPONSE_HEAD_CHARS - LOG_RESPONSE_TAIL_CHARS} chars>..."
+                f"<tail>{escaped[-LOG_RESPONSE_TAIL_CHARS:]}"
+            )
+        return f"<non-text bytes: {response.content[:64].hex()}>"
+
+    @staticmethod
+    def _diagnostic_headers(response: httpx.Response) -> str:
+        values = [
+            f"{name}={response.headers[name]}"
+            for name in DIAGNOSTIC_RESPONSE_HEADERS
+            if name in response.headers
+        ]
+        return ";".join(values) or "<none>"
