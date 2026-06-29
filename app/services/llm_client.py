@@ -261,8 +261,10 @@ class LLMClient:
             response = await client.post(endpoint.url, headers=headers, json=payload)
         self._log_http_response(response, endpoint, attempt, started_at)
         if response.status_code == 429 or response.status_code >= 500:
+            self._log_http_error_response(response, endpoint, attempt)
             response.raise_for_status()
         if response.status_code >= 400:
+            self._log_http_error_response(response, endpoint, attempt)
             raise ServiceError(
                 502,
                 "LLM_REQUEST_REJECTED",
@@ -273,6 +275,7 @@ class LLMClient:
         except json.JSONDecodeError as exc:
             self._log_non_json_response(response, endpoint, exc, attempt, started_at)
             raise
+        self._log_message_content(response_payload, endpoint, attempt)
         try:
             result = self._decode_response_json(response_payload)
         except (ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
@@ -404,7 +407,7 @@ class LLMClient:
     ) -> None:
         logger.info(
             "🤖 模型HTTP响应 | 类型={} | 模型={} | 第{}次 | 状态={} | Content-Type={} | "
-            "body_bytes={} | 耗时={:.2f}s | 响应首尾={}",
+            "body_bytes={} | 耗时={:.2f}s",
             endpoint.role,
             endpoint.model,
             attempt,
@@ -412,6 +415,40 @@ class LLMClient:
             response.headers.get("content-type", ""),
             len(response.content),
             time.perf_counter() - started_at,
+        )
+
+    def _log_message_content(
+        self,
+        payload: dict[str, Any],
+        endpoint: LLMEndpoint,
+        attempt: int,
+    ) -> None:
+        content: Any = None
+        try:
+            content = payload["choices"][0]["message"]["content"]
+        except (KeyError, IndexError, TypeError):
+            pass
+        logger.info(
+            "💬 模型消息内容 | 类型={} | 模型={} | 第{}次 | content_type={} | 内容首尾={}",
+            endpoint.role,
+            endpoint.model,
+            attempt,
+            type(content).__name__,
+            self._text_head_tail(content) if isinstance(content, str) else "<unavailable>",
+        )
+
+    def _log_http_error_response(
+        self,
+        response: httpx.Response,
+        endpoint: LLMEndpoint,
+        attempt: int,
+    ) -> None:
+        logger.warning(
+            "⚠️ 模型HTTP错误响应 | 类型={} | 模型={} | 第{}次 | 状态={} | 响应首尾={}",
+            endpoint.role,
+            endpoint.model,
+            attempt,
+            response.status_code,
             self._response_preview(response),
         )
 
@@ -428,15 +465,19 @@ class LLMClient:
             return "<empty>"
         text = response.text
         if text:
-            escaped = text.replace("\r", "\\r").replace("\n", "\\n")
-            if len(escaped) <= LOG_RESPONSE_HEAD_CHARS + LOG_RESPONSE_TAIL_CHARS:
-                return f"<full>{escaped}"
-            return (
-                f"<head>{escaped[:LOG_RESPONSE_HEAD_CHARS]}"
-                f"...<truncated {len(escaped) - LOG_RESPONSE_HEAD_CHARS - LOG_RESPONSE_TAIL_CHARS} chars>..."
-                f"<tail>{escaped[-LOG_RESPONSE_TAIL_CHARS:]}"
-            )
+            return LLMClient._text_head_tail(text)
         return f"<non-text bytes: {response.content[:64].hex()}>"
+
+    @staticmethod
+    def _text_head_tail(value: str) -> str:
+        escaped = value.replace("\r", "\\r").replace("\n", "\\n")
+        if len(escaped) <= LOG_RESPONSE_HEAD_CHARS + LOG_RESPONSE_TAIL_CHARS:
+            return f"<full>{escaped}"
+        return (
+            f"<head>{escaped[:LOG_RESPONSE_HEAD_CHARS]}"
+            f"...<truncated {len(escaped) - LOG_RESPONSE_HEAD_CHARS - LOG_RESPONSE_TAIL_CHARS} chars>..."
+            f"<tail>{escaped[-LOG_RESPONSE_TAIL_CHARS:]}"
+        )
 
     @staticmethod
     def _diagnostic_headers(response: httpx.Response) -> str:
