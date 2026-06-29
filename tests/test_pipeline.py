@@ -14,7 +14,7 @@ REFERENCE_DIR = Path(__file__).parents[1] / "参考文件"
 
 
 def test_reference_docx_full_pipeline(tmp_path: Path) -> None:
-    expected = "为保障三院地区机房气体灭火系统的稳定运行，我办拟与原服务商续签维保服务合同。报院部阅示。"
+    expected = "为保障三院地区机房气体灭火系统的稳定运行，我办拟与原服务商续签维保服务合同。报送相关部门阅示。"
 
     def handler(request: httpx.Request) -> httpx.Response:
         assert "上海智伏机电科技工程中心" in request.content.decode("utf-8")
@@ -42,4 +42,3 @@ def test_reference_docx_full_pipeline(tmp_path: Path) -> None:
     assert filename == "样例1.docx"
     assert chars > 100
     assert list(tmp_path.iterdir()) == []
-

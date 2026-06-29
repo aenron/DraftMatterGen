@@ -115,7 +115,7 @@ curl -X POST "http://localhost:8000/api/v1/draft-reasons/extract" \
   "code": 200,
   "message": "success",
   "data": {
-    "draft_reason": "为保障三院地区机房气体灭火系统的稳定运行，我办拟与原服务商续签维保服务合同。报院部阅示。",
+    "draft_reason": "为保障三院地区机房气体灭火系统的稳定运行，我办拟与原服务商续签维保服务合同。报送相关部门阅示。",
     "filename": null,
     "chars_processed": null
   },
