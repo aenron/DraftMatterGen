@@ -11,10 +11,10 @@
 - DOC 通过 LibreOffice 无界面转换。
 - TXT 支持 UTF-8、GB18030 和编码自动识别。
 - 校验文件大小、扩展名和文件实际格式。
-- LLM 超时、重试、JSON 响应校验和错误映射。
+- LLM 超时、主备并发重试、JSON 响应校验和错误映射。
 - 长文档分段提取后二次合并。
 - 支持 API Key 鉴权、请求 ID 和容器健康检查。
-- 使用 Loguru 输出请求、解析、模型调用、耗时和异常日志，不记录文档正文或密钥。
+- 使用 Loguru 输出请求、解析、模型调用、耗时和异常日志；模型响应仅记录首尾各 60 字符，不记录请求正文或密钥。
 - 同时提供同步接口和异步任务接口；异步接口支持排队、状态查询、失败信息和结果过期清理。
 - 文档摘要接口支持同步和异步多文件摘要生成。
 
@@ -38,6 +38,17 @@ LLM_BASE_URL=https://your-llm-host/v1
 LLM_API_KEY=your-key
 LLM_MODEL=your-model
 ```
+
+可选备用模型配置：
+
+```dotenv
+BACKUP_LLM_BASE_URL=https://your-backup-llm-host/v1
+BACKUP_LLM_API_KEY=your-backup-key
+BACKUP_LLM_MODEL=your-backup-model
+BACKUP_LLM_CHAT_COMPLETIONS_PATH=/chat/completions
+```
+
+首次调用只请求主用模型。首次失败后，每轮重试会同时请求主用和备用模型，并采用最先成功解析为 JSON 的响应；先返回的失败响应不会终止本轮。备用地址或模型未完整配置时，只重试主用模型。主备真正并行需要 `LLM_MAX_CONCURRENCY` 不小于 `2`。
 
 文件类型配置：
 

@@ -71,6 +71,37 @@ def test_llm_http_round_trip() -> None:
     assert asyncio.run(client.extract_draft_reason("公文正文")) == "拟办理相关事项。"
 
 
+def test_successful_http_response_logs_content_at_info_level() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={"content-type": "application/json"},
+            json={
+                "choices": [
+                    {"message": {"content": '{"draft_reason":"拟办理相关事项。"}'}}
+                ]
+            },
+        )
+
+    settings = Settings(
+        LLM_BASE_URL="https://llm.test/v1",
+        LLM_MODEL="test-model",
+    )
+    client = LLMClient(settings, transport=httpx.MockTransport(handler))
+    messages: list[str] = []
+    sink_id = logger.add(lambda message: messages.append(str(message)), level="INFO")
+    try:
+        assert asyncio.run(client.extract_draft_reason("公文正文")) == "拟办理相关事项。"
+    finally:
+        logger.remove(sink_id)
+
+    log_text = "".join(messages)
+    assert "模型HTTP响应" in log_text
+    assert "状态=200" in log_text
+    assert "响应首尾=<full>" in log_text
+    assert "拟办理相关事项。" in log_text
+
+
 def test_llm_max_concurrency_is_respected() -> None:
     active = 0
     max_active = 0
@@ -102,6 +133,84 @@ def test_llm_max_concurrency_is_respected() -> None:
 
     asyncio.run(run_many())
     assert max_active <= 2
+
+
+def test_retry_races_primary_and_backup_and_uses_first_success() -> None:
+    primary_calls = 0
+    backup_calls = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal primary_calls, backup_calls
+        if request.url.host == "primary.test":
+            primary_calls += 1
+            if primary_calls == 1:
+                return httpx.Response(503, text="primary unavailable")
+            await asyncio.sleep(0.05)
+            reason = "主用结果"
+        else:
+            backup_calls += 1
+            await asyncio.sleep(0.01)
+            reason = "备用结果"
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {"message": {"content": json.dumps({"draft_reason": reason})}}
+                ]
+            },
+        )
+
+    settings = Settings(
+        LLM_BASE_URL="https://primary.test/v1",
+        LLM_MODEL="primary-model",
+        BACKUP_LLM_BASE_URL="https://backup.test/v1",
+        BACKUP_LLM_MODEL="backup-model",
+        LLM_MAX_RETRIES=1,
+        LLM_MAX_CONCURRENCY=2,
+    )
+    client = LLMClient(settings, transport=httpx.MockTransport(handler))
+
+    assert asyncio.run(client.extract_draft_reason("公文正文")) == "备用结果"
+    assert primary_calls == 2
+    assert backup_calls == 1
+
+
+def test_retry_waits_for_primary_when_backup_fails_first() -> None:
+    primary_calls = 0
+    backup_calls = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal primary_calls, backup_calls
+        if request.url.host == "primary.test":
+            primary_calls += 1
+            if primary_calls == 1:
+                return httpx.Response(503, text="primary unavailable")
+            await asyncio.sleep(0.03)
+            return httpx.Response(
+                200,
+                json={
+                    "choices": [
+                        {"message": {"content": '{"draft_reason":"主用恢复结果"}'}}
+                    ]
+                },
+            )
+        backup_calls += 1
+        await asyncio.sleep(0.01)
+        return httpx.Response(502, text="backup unavailable")
+
+    settings = Settings(
+        LLM_BASE_URL="https://primary.test/v1",
+        LLM_MODEL="primary-model",
+        BACKUP_LLM_BASE_URL="https://backup.test/v1",
+        BACKUP_LLM_MODEL="backup-model",
+        LLM_MAX_RETRIES=1,
+        LLM_MAX_CONCURRENCY=2,
+    )
+    client = LLMClient(settings, transport=httpx.MockTransport(handler))
+
+    assert asyncio.run(client.extract_draft_reason("公文正文")) == "主用恢复结果"
+    assert primary_calls == 2
+    assert backup_calls == 1
 
 
 def test_empty_http_response_logs_diagnostic_metadata() -> None:

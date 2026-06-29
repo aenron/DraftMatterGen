@@ -33,6 +33,14 @@ class Settings(BaseSettings):
     llm_temperature: float = Field(0.1, ge=0, le=2, validation_alias="LLM_TEMPERATURE")
     llm_max_tokens: int = Field(300, gt=0, validation_alias="LLM_MAX_TOKENS")
     llm_response_format_json: bool = Field(True, validation_alias="LLM_RESPONSE_FORMAT_JSON")
+    backup_llm_base_url: str = Field("", validation_alias="BACKUP_LLM_BASE_URL")
+    backup_llm_api_key: SecretStr | None = Field(
+        None, validation_alias="BACKUP_LLM_API_KEY"
+    )
+    backup_llm_model: str = Field("", validation_alias="BACKUP_LLM_MODEL")
+    backup_llm_chat_completions_path: str = Field(
+        "/chat/completions", validation_alias="BACKUP_LLM_CHAT_COMPLETIONS_PATH"
+    )
 
     upload_max_mb: int = Field(20, gt=0, validation_alias="UPLOAD_MAX_MB")
     extract_max_chars: int = Field(50_000, gt=1000, validation_alias="EXTRACT_MAX_CHARS")
@@ -106,6 +114,10 @@ class Settings(BaseSettings):
     @property
     def llm_ready(self) -> bool:
         return bool(self.llm_base_url.strip() and self.llm_model.strip())
+
+    @property
+    def backup_llm_ready(self) -> bool:
+        return bool(self.backup_llm_base_url.strip() and self.backup_llm_model.strip())
 
 
 @lru_cache

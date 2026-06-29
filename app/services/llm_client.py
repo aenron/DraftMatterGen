@@ -2,6 +2,7 @@ import asyncio
 import json
 import re
 import time
+from dataclasses import dataclass
 from typing import Any
 
 import httpx
@@ -30,6 +31,19 @@ DIAGNOSTIC_RESPONSE_HEADERS = (
     "x-envoy-upstream-service-time",
     "x-openai-request-id",
 )
+
+
+@dataclass(frozen=True)
+class LLMEndpoint:
+    role: str
+    base_url: str
+    api_key: str | None
+    model: str
+    chat_completions_path: str
+
+    @property
+    def url(self) -> str:
+        return self.base_url.rstrip("/") + "/" + self.chat_completions_path.lstrip("/")
 
 
 class LLMClient:
@@ -77,17 +91,154 @@ class LLMClient:
         if not self.settings.llm_ready:
             raise ServiceError(503, "LLM_NOT_CONFIGURED", "LLM 服务尚未配置")
 
-        url = (
-            self.settings.llm_base_url.rstrip("/")
-            + "/"
-            + self.settings.llm_chat_completions_path.lstrip("/")
+        primary = LLMEndpoint(
+            role="主用",
+            base_url=self.settings.llm_base_url,
+            api_key=(
+                self.settings.llm_api_key.get_secret_value()
+                if self.settings.llm_api_key
+                else None
+            ),
+            model=self.settings.llm_model,
+            chat_completions_path=self.settings.llm_chat_completions_path,
         )
-        headers = {"Content-Type": "application/json"}
-        if self.settings.llm_api_key:
-            headers["Authorization"] = f"Bearer {self.settings.llm_api_key.get_secret_value()}"
+        backup = (
+            LLMEndpoint(
+                role="备用",
+                base_url=self.settings.backup_llm_base_url,
+                api_key=(
+                    self.settings.backup_llm_api_key.get_secret_value()
+                    if self.settings.backup_llm_api_key
+                    else None
+                ),
+                model=self.settings.backup_llm_model,
+                chat_completions_path=self.settings.backup_llm_chat_completions_path,
+            )
+            if self.settings.backup_llm_ready
+            else None
+        )
 
+        last_error: Exception | None = None
+        async with httpx.AsyncClient(
+            timeout=self.settings.llm_timeout_seconds,
+            transport=self.transport,
+        ) as client:
+            for attempt in range(self.settings.llm_max_retries + 1):
+                try:
+                    endpoints = [primary] if attempt == 0 or backup is None else [primary, backup]
+                    if len(endpoints) == 1:
+                        result = await self._request_endpoint(
+                            client,
+                            endpoints[0],
+                            system_prompt,
+                            user_prompt,
+                            input_chars=input_chars,
+                            max_tokens=max_tokens,
+                            attempt=attempt + 1,
+                        )
+                    else:
+                        logger.warning(
+                            "↻ 启动主备LLM并发重试 | 第{}次 | 主用模型={} | 备用模型={}",
+                            attempt + 1,
+                            primary.model,
+                            backup.model,
+                        )
+                        result = await self._race_endpoints(
+                            client,
+                            endpoints,
+                            system_prompt,
+                            user_prompt,
+                            input_chars=input_chars,
+                            max_tokens=max_tokens,
+                            attempt=attempt + 1,
+                        )
+                    return result
+                except (
+                    ServiceError,
+                    httpx.TimeoutException,
+                    httpx.NetworkError,
+                    httpx.HTTPStatusError,
+                    ValueError,
+                    KeyError,
+                    TypeError,
+                    json.JSONDecodeError,
+                ) as exc:
+                    last_error = exc
+                    logger.warning(
+                        "⚠️ 本轮模型调用均失败 | 第{}次 | 异常={} | 是否继续重试={}",
+                        attempt + 1,
+                        type(exc).__name__,
+                        attempt < self.settings.llm_max_retries,
+                    )
+                    if attempt < self.settings.llm_max_retries:
+                        await asyncio.sleep(min(0.5 * (2**attempt), 2.0))
+                        continue
+
+        if isinstance(last_error, httpx.TimeoutException):
+            raise ServiceError(504, "LLM_TIMEOUT", "LLM 服务调用超时") from last_error
+        if isinstance(last_error, (ValueError, KeyError, TypeError, json.JSONDecodeError)):
+            raise ServiceError(502, "LLM_INVALID_RESPONSE", "LLM 返回内容格式错误") from last_error
+        if isinstance(last_error, ServiceError):
+            raise last_error
+        raise ServiceError(502, "LLM_UNAVAILABLE", "LLM 服务暂时不可用") from last_error
+
+    async def _race_endpoints(
+        self,
+        client: httpx.AsyncClient,
+        endpoints: list[LLMEndpoint],
+        system_prompt: str,
+        user_prompt: str,
+        *,
+        input_chars: int,
+        max_tokens: int,
+        attempt: int,
+    ) -> dict[str, Any]:
+        tasks = [
+            asyncio.create_task(
+                self._request_endpoint(
+                    client,
+                    endpoint,
+                    system_prompt,
+                    user_prompt,
+                    input_chars=input_chars,
+                    max_tokens=max_tokens,
+                    attempt=attempt,
+                )
+            )
+            for endpoint in endpoints
+        ]
+        errors: list[BaseException] = []
+        try:
+            for completed in asyncio.as_completed(tasks):
+                try:
+                    return await completed
+                except asyncio.CancelledError:
+                    raise
+                except BaseException as exc:
+                    errors.append(exc)
+            raise errors[-1]
+        finally:
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+    async def _request_endpoint(
+        self,
+        client: httpx.AsyncClient,
+        endpoint: LLMEndpoint,
+        system_prompt: str,
+        user_prompt: str,
+        *,
+        input_chars: int,
+        max_tokens: int,
+        attempt: int,
+    ) -> dict[str, Any]:
+        headers = {"Content-Type": "application/json"}
+        if endpoint.api_key:
+            headers["Authorization"] = f"Bearer {endpoint.api_key}"
         payload: dict[str, Any] = {
-            "model": self.settings.llm_model,
+            "model": endpoint.model,
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
@@ -98,103 +249,45 @@ class LLMClient:
         if self.settings.llm_response_format_json:
             payload["response_format"] = {"type": "json_object"}
 
-        last_error: Exception | None = None
-        async with httpx.AsyncClient(
-            timeout=self.settings.llm_timeout_seconds,
-            transport=self.transport,
-        ) as client:
-            for attempt in range(self.settings.llm_max_retries + 1):
-                started_at = time.perf_counter()
-                try:
-                    async with self._semaphore:
-                        logger.debug(
-                            "llm_request_started model={} input_chars={} attempt={}",
-                            self.settings.llm_model,
-                            input_chars,
-                            attempt + 1,
-                        )
-                        response = await client.post(url, headers=headers, json=payload)
-                    if response.status_code == 429 or response.status_code >= 500:
-                        response.raise_for_status()
-                    if response.status_code >= 400:
-                        raise ServiceError(
-                            502,
-                            "LLM_REQUEST_REJECTED",
-                            f"LLM 服务拒绝请求，状态码 {response.status_code}",
-                        )
-                    try:
-                        response_payload = response.json()
-                    except json.JSONDecodeError as exc:
-                        last_error = exc
-                        logger.warning(
-                            "⚠️ 模型HTTP响应不是JSON | 模型={} | 第{}次 | URL={} | 状态={} | "
-                            "HTTP版本={} | Content-Type={} | 编码={} | body_bytes={} | "
-                            "JSON错误=行{}列{}位置{}:{} | 响应头={} | 耗时={:.2f}s | 响应首尾={}",
-                            self.settings.llm_model,
-                            attempt + 1,
-                            response.request.url.copy_with(query=None),
-                            response.status_code,
-                            response.http_version or "unknown",
-                            response.headers.get("content-type", ""),
-                            response.encoding or "unknown",
-                            len(response.content),
-                            exc.lineno,
-                            exc.colno,
-                            exc.pos,
-                            exc.msg,
-                            self._diagnostic_headers(response),
-                            time.perf_counter() - started_at,
-                            self._response_preview(response),
-                        )
-                        if attempt < self.settings.llm_max_retries:
-                            await asyncio.sleep(min(0.5 * (2**attempt), 2.0))
-                            continue
-                        raise
-
-                    try:
-                        result = self._decode_response_json(response_payload)
-                    except (ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
-                        last_error = exc
-                        self._log_invalid_llm_payload(response_payload, exc, attempt + 1)
-                        if attempt < self.settings.llm_max_retries:
-                            await asyncio.sleep(min(0.5 * (2**attempt), 2.0))
-                            continue
-                        raise
-
-                    logger.debug(
-                        "llm_request_completed model={} status={} result_chars={} duration_ms={:.2f}",
-                        self.settings.llm_model,
-                        response.status_code,
-                        len(str(result)),
-                        (time.perf_counter() - started_at) * 1000,
-                    )
-                    return result
-                except ServiceError:
-                    raise
-                except (httpx.TimeoutException, httpx.NetworkError, httpx.HTTPStatusError) as exc:
-                    last_error = exc
-                    logger.warning(
-                        "⚠️ 模型调用异常，准备重试 | 模型={} | 第{}次 | 异常={} | 耗时={:.2f}s",
-                        self.settings.llm_model,
-                        attempt + 1,
-                        type(exc).__name__,
-                        time.perf_counter() - started_at,
-                    )
-                    if attempt < self.settings.llm_max_retries:
-                        await asyncio.sleep(min(0.5 * (2**attempt), 2.0))
-                        continue
-                except (ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
-                    last_error = exc
-                    logger.debug(
-                        "llm_invalid_response model={} error_type={}",
-                        self.settings.llm_model,
-                        type(exc).__name__,
-                    )
-                    raise ServiceError(502, "LLM_INVALID_RESPONSE", "LLM 返回内容格式错误") from exc
-
-        if isinstance(last_error, httpx.TimeoutException):
-            raise ServiceError(504, "LLM_TIMEOUT", "LLM 服务调用超时") from last_error
-        raise ServiceError(502, "LLM_UNAVAILABLE", "LLM 服务暂时不可用") from last_error
+        started_at = time.perf_counter()
+        async with self._semaphore:
+            logger.debug(
+                "llm_request_started role={} model={} input_chars={} attempt={}",
+                endpoint.role,
+                endpoint.model,
+                input_chars,
+                attempt,
+            )
+            response = await client.post(endpoint.url, headers=headers, json=payload)
+        self._log_http_response(response, endpoint, attempt, started_at)
+        if response.status_code == 429 or response.status_code >= 500:
+            response.raise_for_status()
+        if response.status_code >= 400:
+            raise ServiceError(
+                502,
+                "LLM_REQUEST_REJECTED",
+                f"{endpoint.role} LLM 服务拒绝请求，状态码 {response.status_code}",
+            )
+        try:
+            response_payload = response.json()
+        except json.JSONDecodeError as exc:
+            self._log_non_json_response(response, endpoint, exc, attempt, started_at)
+            raise
+        try:
+            result = self._decode_response_json(response_payload)
+        except (ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
+            self._log_invalid_llm_payload(
+                response_payload, exc, attempt, endpoint.role, endpoint.model
+            )
+            raise
+        logger.info(
+            "✅ 模型响应解析成功 | 类型={} | 模型={} | 第{}次 | 结果长度={}",
+            endpoint.role,
+            endpoint.model,
+            attempt,
+            len(str(result)),
+        )
+        return result
 
     @staticmethod
     def _parse_response(payload: dict[str, Any]) -> str:
@@ -247,6 +340,8 @@ class LLMClient:
         payload: dict[str, Any],
         exc: Exception,
         attempt: int,
+        endpoint_role: str,
+        model: str,
     ) -> None:
         content: Any = None
         finish_reason: Any = None
@@ -258,14 +353,66 @@ class LLMClient:
             pass
 
         logger.warning(
-            "⚠️ 模型消息内容不是有效JSON | 模型={} | 第{}次 | 异常={} | finish_reason={} | content_type={} | content_preview={} | payload_keys={}",
-            self.settings.llm_model,
+            "⚠️ 模型消息内容不是有效JSON | 类型={} | 模型={} | 第{}次 | 异常={} | "
+            "finish_reason={} | content_type={} | content_preview={} | payload_keys={}",
+            endpoint_role,
+            model,
             attempt,
             type(exc).__name__,
             finish_reason,
             type(content).__name__,
             self._preview(content) if isinstance(content, str) else "",
             ",".join(payload.keys()),
+        )
+
+    def _log_non_json_response(
+        self,
+        response: httpx.Response,
+        endpoint: LLMEndpoint,
+        exc: json.JSONDecodeError,
+        attempt: int,
+        started_at: float,
+    ) -> None:
+        logger.warning(
+            "⚠️ 模型HTTP响应不是JSON | 类型={} | 模型={} | 第{}次 | URL={} | 状态={} | "
+            "HTTP版本={} | Content-Type={} | 编码={} | body_bytes={} | "
+            "JSON错误=行{}列{}位置{}:{} | 响应头={} | 耗时={:.2f}s | 响应首尾={}",
+            endpoint.role,
+            endpoint.model,
+            attempt,
+            response.request.url.copy_with(query=None),
+            response.status_code,
+            response.http_version or "unknown",
+            response.headers.get("content-type", ""),
+            response.encoding or "unknown",
+            len(response.content),
+            exc.lineno,
+            exc.colno,
+            exc.pos,
+            exc.msg,
+            self._diagnostic_headers(response),
+            time.perf_counter() - started_at,
+            self._response_preview(response),
+        )
+
+    def _log_http_response(
+        self,
+        response: httpx.Response,
+        endpoint: LLMEndpoint,
+        attempt: int,
+        started_at: float,
+    ) -> None:
+        logger.info(
+            "🤖 模型HTTP响应 | 类型={} | 模型={} | 第{}次 | 状态={} | Content-Type={} | "
+            "body_bytes={} | 耗时={:.2f}s | 响应首尾={}",
+            endpoint.role,
+            endpoint.model,
+            attempt,
+            response.status_code,
+            response.headers.get("content-type", ""),
+            len(response.content),
+            time.perf_counter() - started_at,
+            self._response_preview(response),
         )
 
     @staticmethod
