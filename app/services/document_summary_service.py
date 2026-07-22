@@ -30,6 +30,7 @@ SUMMARY_KEYWORDS = (
 
 
 SUMMARY_PARSEABLE_EXTENSIONS = {"doc", "docx", "pdf", "txt"}
+SUMMARY_STAMP_NOTE = "文件需要盖章。"
 
 
 class DocumentSummaryService:
@@ -89,7 +90,7 @@ class DocumentSummaryService:
 
         try:
             parsed = await self.document_service.extract_upload_document(upload)
-            summary = await self._summarize_document(parsed)
+            summary = self._append_stamp_note(await self._summarize_document(parsed))
             logger.debug(
                 "document_summary_completed filename={} source_chars={} summary_chars={}",
                 parsed.filename,
@@ -227,3 +228,10 @@ class DocumentSummaryService:
                 )
             )
         return "\n\n".join(parts)
+
+    @staticmethod
+    def _append_stamp_note(summary: str) -> str:
+        summary = summary.strip()
+        if summary.endswith(SUMMARY_STAMP_NOTE):
+            return summary
+        return f"{summary}{SUMMARY_STAMP_NOTE}"

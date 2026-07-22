@@ -90,6 +90,9 @@ class Settings(BaseSettings):
     summary_max_pdf_pages: int = Field(
         50, gt=0, le=500, validation_alias="SUMMARY_MAX_PDF_PAGES"
     )
+    summary_llm_max_tokens: int = Field(
+        300, gt=0, validation_alias="SUMMARY_LLM_MAX_TOKENS"
+    )
 
     @property
     def allowed_extension_set(self) -> set[str]:

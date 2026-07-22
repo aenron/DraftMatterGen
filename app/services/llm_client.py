@@ -73,7 +73,7 @@ class LLMClient:
             SUMMARY_SYSTEM_PROMPT,
             build_summary_user_prompt(document_text),
             input_chars=len(document_text),
-            max_tokens=max(self.settings.llm_max_tokens, 800),
+            max_tokens=self.settings.summary_llm_max_tokens,
         )
         summary = payload.get("summary")
         if not isinstance(summary, str) or not summary.strip():

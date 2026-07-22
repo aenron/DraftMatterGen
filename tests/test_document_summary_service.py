@@ -6,7 +6,7 @@ from fastapi import UploadFile
 
 from app.core.config import Settings
 from app.services.document_service import ParsedDocument
-from app.services.document_summary_service import DocumentSummaryService
+from app.services.document_summary_service import DocumentSummaryService, SUMMARY_STAMP_NOTE
 
 
 class FakeDocumentService:
@@ -96,9 +96,18 @@ def test_long_document_is_chunked_and_merged(tmp_path: Path) -> None:
     result = asyncio.run(service.summarize_uploads([upload]))[0]
 
     assert result.status == "succeeded"
-    assert result.summary == "摘要4"
+    assert result.summary == f"摘要4{SUMMARY_STAMP_NOTE}"
     assert len(llm.inputs) == 4
     assert "正文切片摘要" in llm.inputs[-1]
+
+
+def test_summary_appends_stamp_note_once(tmp_path: Path) -> None:
+    service = DocumentSummaryService(make_settings(tmp_path))
+
+    assert service._append_stamp_note("摘要正文") == f"摘要正文{SUMMARY_STAMP_NOTE}"
+    assert service._append_stamp_note(f"摘要正文{SUMMARY_STAMP_NOTE}") == (
+        f"摘要正文{SUMMARY_STAMP_NOTE}"
+    )
 
 
 def test_pdf_opening_uses_page_boundaries(tmp_path: Path) -> None:

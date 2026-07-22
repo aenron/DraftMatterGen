@@ -138,6 +138,29 @@ def test_llm_max_concurrency_is_respected() -> None:
     assert max_active <= 2
 
 
+def test_summary_uses_summary_specific_token_limit() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        assert body["max_tokens"] == 240
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {"message": {"content": '{"summary":"短摘要"}'}}
+                ]
+            },
+        )
+
+    settings = Settings(
+        LLM_BASE_URL="https://llm.test/v1",
+        LLM_MODEL="test-model",
+        LLM_MAX_TOKENS=1200,
+        SUMMARY_LLM_MAX_TOKENS=240,
+    )
+    client = LLMClient(settings, transport=httpx.MockTransport(handler))
+    assert asyncio.run(client.summarize_document("文档正文")) == "短摘要"
+
+
 def test_retry_races_primary_and_backup_and_uses_first_success() -> None:
     primary_calls = 0
     backup_calls = 0
