@@ -18,6 +18,7 @@ from fastapi import UploadFile
 from loguru import logger
 
 from app.core.config import Settings
+from app.core.draft_type import DraftType
 from app.core.errors import ServiceError
 from app.services.draft_reason_service import DraftReasonService
 from app.services.document_summary_service import (
@@ -67,6 +68,7 @@ class JobRecord:
     filename: str
     file_path: Path
     request_id: str
+    draft_type: DraftType | None
     status: JobStatus
     submitted_at: datetime
     updated_at: float
@@ -79,6 +81,7 @@ class JobRecord:
         return {
             "job_id": self.job_id,
             "status": self.status,
+            "draft_type": self.draft_type,
             "submitted_at": self.submitted_at,
             "started_at": self.started_at,
             "completed_at": self.completed_at,
@@ -104,6 +107,7 @@ class SQLiteJobStore:
                     filename TEXT NOT NULL,
                     file_path TEXT NOT NULL,
                     request_id TEXT NOT NULL,
+                    draft_type TEXT,
                     status TEXT NOT NULL,
                     submitted_at TEXT NOT NULL,
                     started_at TEXT,
@@ -123,6 +127,8 @@ class SQLiteJobStore:
                 connection.execute(
                     "ALTER TABLE jobs ADD COLUMN job_type TEXT NOT NULL DEFAULT 'draft_reason'"
                 )
+            if "draft_type" not in columns:
+                connection.execute("ALTER TABLE jobs ADD COLUMN draft_type TEXT")
             connection.execute(
                 "CREATE INDEX IF NOT EXISTS idx_jobs_status_updated ON jobs(status, updated_at)"
             )
@@ -135,9 +141,9 @@ class SQLiteJobStore:
             connection.execute(
                 """
                 INSERT INTO jobs (
-                    job_id, job_type, filename, file_path, request_id, status,
+                    job_id, job_type, filename, file_path, request_id, draft_type, status,
                     submitted_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     record.job_id,
@@ -145,6 +151,7 @@ class SQLiteJobStore:
                     record.filename,
                     str(record.file_path),
                     record.request_id,
+                    record.draft_type.value if record.draft_type else None,
                     record.status.value,
                     record.submitted_at.isoformat(),
                     record.updated_at,
@@ -300,6 +307,7 @@ class SQLiteJobStore:
             filename=row["filename"],
             file_path=Path(row["file_path"]),
             request_id=row["request_id"],
+            draft_type=DraftType(row["draft_type"]) if row["draft_type"] else None,
             status=JobStatus(row["status"]),
             submitted_at=parse_datetime(row["submitted_at"]),
             started_at=parse_datetime(row["started_at"]) if row["started_at"] else None,
@@ -370,7 +378,9 @@ class AsyncJobManager:
         self.workers.clear()
         self.cleanup_task = None
 
-    async def submit(self, upload: UploadFile, request_id: str) -> JobRecord:
+    async def submit(
+        self, upload: UploadFile, request_id: str, draft_type: DraftType | None = None
+    ) -> JobRecord:
         filename = Path(upload.filename or "").name
         suffix = Path(filename).suffix.lower().lstrip(".")
         if not filename or not suffix:
@@ -413,6 +423,7 @@ class AsyncJobManager:
             filename=filename,
             file_path=file_path,
             request_id=request_id,
+            draft_type=draft_type,
             status=JobStatus.QUEUED,
             submitted_at=current_datetime(),
             updated_at=time.time(),
@@ -493,6 +504,7 @@ class AsyncJobManager:
             filename=filenames,
             file_path=job_dir,
             request_id=request_id,
+            draft_type=None,
             status=JobStatus.QUEUED,
             submitted_at=current_datetime(),
             updated_at=time.time(),
@@ -563,10 +575,13 @@ class AsyncJobManager:
                 with record.file_path.open("rb") as stream:
                     upload = UploadFile(filename=record.filename, file=stream)
                     reason, result_filename, chars = (
-                        await self.draft_reason_service.extract_from_upload(upload)
+                        await self.draft_reason_service.extract_from_upload(
+                            upload, record.draft_type
+                        )
                     )
                 result = {
                     "draft_reason": reason,
+                    "draft_type": record.draft_type,
                     "filename": result_filename,
                     "chars_processed": chars,
                 }

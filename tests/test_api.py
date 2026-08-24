@@ -16,20 +16,20 @@ from app.services.draft_reason_service import DraftReasonService
 
 
 class FakeDraftReasonService:
-    async def extract_from_upload(self, upload):
+    async def extract_from_upload(self, upload, draft_type=None):
         await upload.read()
         await upload.close()
         return "根据工作需要，拟办理相关事项。", upload.filename, 120
 
 
 class FailingDraftReasonService:
-    async def extract_from_upload(self, upload):
+    async def extract_from_upload(self, upload, draft_type=None):
         await upload.close()
         raise ServiceError(502, "LLM_UNAVAILABLE", "LLM 服务暂时不可用")
 
 
 class BlockingDraftReasonService:
-    async def extract_from_upload(self, upload):
+    async def extract_from_upload(self, upload, draft_type=None):
         await asyncio.sleep(60)
 
 
@@ -100,6 +100,29 @@ def test_extract_with_metadata(tmp_path: Path) -> None:
     )
     assert response.json()["data"]["filename"] == "sample.txt"
     assert response.json()["data"]["chars_processed"] == 120
+
+
+def test_extract_accepts_draft_type(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    response = client.post(
+        "/api/v1/draft-reasons/extract",
+        files={"file": ("sample.txt", b"test", "text/plain")},
+        data={"draft_type": "report"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["draft_type"] == "report"
+
+
+def test_extract_rejects_invalid_draft_type(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    response = client.post(
+        "/api/v1/draft-reasons/extract",
+        files={"file": ("sample.txt", b"test", "text/plain")},
+        data={"draft_type": "notice"},
+    )
+
+    assert response.status_code == 422
 
 
 def test_api_key(tmp_path: Path) -> None:
@@ -329,6 +352,26 @@ def test_async_extract_success(tmp_path: Path) -> None:
         assert body["result"]["filename"] == "sample.txt"
         assert body["result"]["chars_processed"] == 120
         assert body["error"] is None
+
+
+def test_async_extract_persists_draft_type(tmp_path: Path) -> None:
+    with make_client(tmp_path) as client:
+        submitted = client.post(
+            "/api/v1/draft-reasons/extract-async",
+            files={"file": ("sample.txt", b"test", "text/plain")},
+            data={"draft_type": "request_or_submission"},
+        )
+        job_id = submitted.json()["data"]["job_id"]
+
+        for _ in range(100):
+            body = client.get(f"/api/v1/draft-reasons/jobs/{job_id}").json()["data"]
+            if body["status"] == "succeeded":
+                break
+            time.sleep(0.01)
+
+        assert body["status"] == "succeeded"
+        assert body["draft_type"] == "request_or_submission"
+        assert body["result"]["draft_type"] == "request_or_submission"
 
 
 def test_async_job_not_found(tmp_path: Path) -> None:

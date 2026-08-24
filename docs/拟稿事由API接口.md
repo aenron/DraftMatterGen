@@ -121,6 +121,9 @@ Content-Type: multipart/form-data
 | 参数 | 类型 | 必填 | 说明 |
 |---|---|---:|---|
 | file | binary | 是 | DOCX、DOC 或 TXT 文件 |
+| draft_type | string | 否 | 稿件类型：`letter`（函件）、`report`（报告）或 `request_or_submission`（请示、报送类）。不传时保持原有由 AI 判断文种的行为。 |
+
+`draft_type=letter` 时，服务端会在 AI 提炼结果后追加“特此致函，恳请予以支持配合。”；`draft_type=report` 时追加“特此报告。”；`draft_type=request_or_submission` 时，AI 根据正文识别报送部门并生成“报送xx部门阅示。”。
 
 ### 4.2 cURL 示例
 
@@ -128,7 +131,8 @@ Content-Type: multipart/form-data
 curl -X POST \
   "http://127.0.0.1:8000/api/v1/draft-reasons/extract?include_metadata=true" \
   -H "X-API-Key: your-api-key" \
-  -F "file=@参考文件/样例1.docx"
+  -F "file=@参考文件/样例1.docx" \
+  -F "draft_type=report"
 ```
 
 ### 4.3 成功响应
@@ -140,7 +144,8 @@ HTTP 状态码：`200 OK`
   "code": 200,
   "message": "success",
   "data": {
-    "draft_reason": "为保障三地院区气体灭火系统的稳定运行，我办拟与原服务商续签维保服务合同。报送相关部门阅示。",
+    "draft_reason": "为保障三地院区气体灭火系统的稳定运行，我办拟与原服务商续签维保服务合同。特此报告。",
+    "draft_type": "report",
     "filename": "样例1.docx",
     "chars_processed": 180
   },
@@ -155,6 +160,7 @@ HTTP 状态码：`200 OK`
 | 字段 | 类型 | 说明 |
 |---|---|---|
 | data.draft_reason | string | 提取并归纳后的拟稿事由 |
+| data.draft_type | string/null | 本次请求声明的稿件类型；未声明时为 `null` |
 | data.filename | string/null | 原始文件名 |
 | data.chars_processed | integer/null | 从文档中提取并送入业务处理的文本字符数 |
 
@@ -174,6 +180,7 @@ Content-Type: multipart/form-data
 | 参数 | 类型 | 必填 | 说明 |
 |---|---|---:|---|
 | file | binary | 是 | DOCX、DOC 或 TXT 文件 |
+| draft_type | string | 否 | 同步接口的稿件类型规则；该值会随任务持久化，后台处理时生效。 |
 
 ### 5.2 cURL 示例
 
@@ -181,7 +188,8 @@ Content-Type: multipart/form-data
 curl -X POST \
   "http://127.0.0.1:8000/api/v1/draft-reasons/extract-async" \
   -H "X-API-Key: your-api-key" \
-  -F "file=@参考文件/样例1.docx"
+  -F "file=@参考文件/样例1.docx" \
+  -F "draft_type=request_or_submission"
 ```
 
 ### 5.3 成功响应
@@ -260,6 +268,7 @@ HTTP 状态码：`200 OK`
   "data": {
     "job_id": "a73cd05ff07f4d18bb4e0f7758255ec4",
     "status": "processing",
+    "draft_type": "request_or_submission",
     "submitted_at": "2026-06-24T10:10:00.000000",
     "started_at": "2026-06-24T10:10:00.120000",
     "completed_at": null,
@@ -281,11 +290,13 @@ HTTP 状态码：`200 OK`
   "data": {
     "job_id": "a73cd05ff07f4d18bb4e0f7758255ec4",
     "status": "succeeded",
+    "draft_type": "request_or_submission",
     "submitted_at": "2026-06-24T10:10:00.000000",
     "started_at": "2026-06-24T10:10:00.120000",
     "completed_at": "2026-06-24T10:10:01.708000",
     "result": {
       "draft_reason": "为保障三地院区气体灭火系统的稳定运行，我办拟与原服务商续签维保服务合同。报送相关部门阅示。",
+      "draft_type": "request_or_submission",
       "filename": "样例1.docx",
       "chars_processed": 180
     },

@@ -105,7 +105,8 @@ ASYNC_DATA_DIR=./data
 ```bash
 curl -X POST "http://localhost:8000/api/v1/draft-reasons/extract" \
   -H "X-API-Key: replace-me" \
-  -F "file=@参考文件/样例1.docx"
+  -F "file=@参考文件/样例1.docx" \
+  -F "draft_type=report"
 ```
 
 返回示例：
@@ -115,7 +116,8 @@ curl -X POST "http://localhost:8000/api/v1/draft-reasons/extract" \
   "code": 200,
   "message": "success",
   "data": {
-    "draft_reason": "为保障三院地区机房气体灭火系统的稳定运行，我办拟与原服务商续签维保服务合同。报送相关部门阅示。",
+    "draft_reason": "为保障三院地区机房气体灭火系统的稳定运行，我办拟与原服务商续签维保服务合同。特此报告。",
+    "draft_type": "report",
     "filename": null,
     "chars_processed": null
   },
@@ -125,6 +127,8 @@ curl -X POST "http://localhost:8000/api/v1/draft-reasons/extract" \
 
 传入 `?include_metadata=true` 可返回文件名和处理字符数。
 
+拟稿事由接口可选传入 `draft_type` 声明稿件类型：`letter`（函件，服务端追加“特此致函，恳请予以支持配合。”）、`report`（报告，服务端追加“特此报告。”）或 `request_or_submission`（请示、报送类，由 AI 根据正文生成“报送xx部门阅示。”）。不传时保持原有由 AI 判断文种的行为。
+
 ## 异步接口
 
 提交任务后接口立即返回 HTTP `202`：
@@ -132,7 +136,8 @@ curl -X POST "http://localhost:8000/api/v1/draft-reasons/extract" \
 ```bash
 curl -X POST "http://localhost:8000/api/v1/draft-reasons/extract-async" \
   -H "X-API-Key: replace-me" \
-  -F "file=@参考文件/样例1.docx"
+  -F "file=@参考文件/样例1.docx" \
+  -F "draft_type=request_or_submission"
 ```
 
 响应示例：

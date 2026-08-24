@@ -3,9 +3,12 @@ from typing import Literal
 
 from pydantic import BaseModel
 
+from app.core.draft_type import DraftType
+
 
 class DraftReasonData(BaseModel):
     draft_reason: str
+    draft_type: DraftType | None = None
     filename: str | None = None
     chars_processed: int | None = None
 
@@ -61,6 +64,7 @@ class AsyncJobError(BaseModel):
 class AsyncJobData(BaseModel):
     job_id: str
     status: str
+    draft_type: DraftType | None = None
     submitted_at: datetime
     started_at: datetime | None = None
     completed_at: datetime | None = None

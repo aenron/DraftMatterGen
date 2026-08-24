@@ -1,7 +1,7 @@
 import secrets
 from pathlib import Path
 
-from fastapi import APIRouter, File, Header, Query, Request, UploadFile
+from fastapi import APIRouter, File, Form, Header, Query, Request, UploadFile
 from loguru import logger
 
 from app.api.schemas import (
@@ -18,6 +18,7 @@ from app.api.schemas import (
     HealthResponse,
 )
 from app.core.errors import ServiceError
+from app.core.draft_type import DraftType
 from app.services.async_job_manager import JobType
 
 
@@ -39,6 +40,7 @@ def _check_api_key(request: Request, provided: str | None) -> None:
 async def extract_draft_reason(
     request: Request,
     file: UploadFile = File(...),
+    draft_type: DraftType | None = Form(None),
     include_metadata: bool = Query(False),
     x_api_key: str | None = Header(None, alias="X-API-Key"),
 ) -> DraftReasonResponse:
@@ -46,7 +48,7 @@ async def extract_draft_reason(
     upload_filename = Path(file.filename or "").name or "-"
     with logger.contextualize(filename=upload_filename):
         reason, filename, chars = (
-            await request.app.state.draft_reason_service.extract_from_upload(file)
+            await request.app.state.draft_reason_service.extract_from_upload(file, draft_type)
         )
     request.state.filename = filename
     request.state.source_chars = chars
@@ -54,6 +56,7 @@ async def extract_draft_reason(
     return DraftReasonResponse(
         data=DraftReasonData(
             draft_reason=reason,
+            draft_type=draft_type,
             filename=filename if include_metadata else None,
             chars_processed=chars if include_metadata else None,
         ),
@@ -130,13 +133,14 @@ async def get_document_summary_job(
 async def submit_draft_reason_job(
     request: Request,
     file: UploadFile = File(...),
+    draft_type: DraftType | None = Form(None),
     x_api_key: str | None = Header(None, alias="X-API-Key"),
 ) -> AsyncJobSubmissionResponse:
     _check_api_key(request, x_api_key)
     request.state.filename = Path(file.filename or "").name or "-"
     with logger.contextualize(filename=request.state.filename):
         record = await request.app.state.async_job_manager.submit(
-            file, request.state.request_id
+            file, request.state.request_id, draft_type
         )
     status_url = str(request.url_for("get_draft_reason_job", job_id=record.job_id))
     return AsyncJobSubmissionResponse(

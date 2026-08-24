@@ -3,6 +3,7 @@ import re
 from loguru import logger
 
 from app.core.config import Settings
+from app.core.draft_type import DraftType
 from app.core.errors import ServiceError
 from app.services.document_service import DocumentService
 from app.services.llm_client import LLMClient
@@ -19,10 +20,13 @@ class DraftReasonService:
         self.document_service = document_service or DocumentService(settings)
         self.llm_client = llm_client or LLMClient(settings)
 
-    async def extract_from_upload(self, upload) -> tuple[str, str, int]:
+    async def extract_from_upload(
+        self, upload, draft_type: DraftType | None = None
+    ) -> tuple[str, str, int]:
         text, filename = await self.document_service.extract_upload(upload)
-        reason = await self._extract_text(text)
+        reason = await self._extract_text(text, draft_type)
         normalized = self._normalize_reason(reason)
+        normalized = self._append_fixed_ending(normalized, draft_type)
         logger.debug(
             "draft_reason_completed filename={} source_chars={} result_chars={}",
             filename,
@@ -31,17 +35,19 @@ class DraftReasonService:
         )
         return normalized, filename, len(text)
 
-    async def _extract_text(self, text: str) -> str:
+    async def _extract_text(self, text: str, draft_type: DraftType | None) -> str:
         if len(text) <= self.settings.extract_max_chars:
-            return await self.llm_client.extract_draft_reason(text)
+            return await self.llm_client.extract_draft_reason(text, draft_type)
 
         chunks = self._split_chunks(text)
         logger.info("long_document_split source_chars={} chunks={}", len(text), len(chunks))
-        candidates = [await self.llm_client.extract_draft_reason(chunk) for chunk in chunks]
+        candidates = [
+            await self.llm_client.extract_draft_reason(chunk, draft_type) for chunk in chunks
+        ]
         merged_input = "以下是同一文档各部分提取出的候选拟稿事由，请结合并去重，输出最终拟稿事由：\n" + "\n".join(
             f"{index + 1}. {candidate}" for index, candidate in enumerate(candidates)
         )
-        return await self.llm_client.extract_draft_reason(merged_input)
+        return await self.llm_client.extract_draft_reason(merged_input, draft_type)
 
     def _split_chunks(self, text: str) -> list[str]:
         limit = self.settings.extract_max_chars
@@ -79,3 +85,14 @@ class DraftReasonService:
         if len(reason) > 300:
             raise ServiceError(502, "LLM_RESULT_TOO_LONG", "LLM 返回的拟稿事由过长")
         return reason
+
+    @staticmethod
+    def _append_fixed_ending(reason: str, draft_type: DraftType | None) -> str:
+        endings = {
+            DraftType.LETTER: "特此致函，恳请予以支持配合。",
+            DraftType.REPORT: "特此报告。",
+        }
+        ending = endings.get(draft_type)
+        if ending is None or reason.endswith(ending):
+            return reason
+        return f"{reason}{ending}"

@@ -10,7 +10,7 @@ from loguru import logger
 
 from app.core.config import Settings
 from app.core.errors import ServiceError
-from app.prompts.draft_reason import SYSTEM_PROMPT, build_user_prompt
+from app.prompts.draft_reason import build_system_prompt, build_user_prompt
 from app.prompts.document_summary import (
     SYSTEM_PROMPT as SUMMARY_SYSTEM_PROMPT,
     build_user_prompt as build_summary_user_prompt,
@@ -56,9 +56,11 @@ class LLMClient:
         self.transport = transport
         self._semaphore = asyncio.Semaphore(settings.llm_max_concurrency)
 
-    async def extract_draft_reason(self, document_text: str) -> str:
+    async def extract_draft_reason(
+        self, document_text: str, draft_type: str | None = None
+    ) -> str:
         payload = await self._chat_json(
-            SYSTEM_PROMPT,
+            build_system_prompt(draft_type),
             build_user_prompt(document_text),
             input_chars=len(document_text),
             max_tokens=self.settings.llm_max_tokens,
