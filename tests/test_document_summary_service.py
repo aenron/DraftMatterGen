@@ -139,8 +139,8 @@ def test_summary_removes_unreadable_notice_and_terminal_punctuation(tmp_path: Pa
     assert results[0].summary == f"正文内容。{SUMMARY_STAMP_NOTE}"
 
 
-def test_summary_prompt_forbids_unreadable_notice() -> None:
-    assert "不得输出“可读取内容有限”" in SYSTEM_PROMPT
+def test_summary_prompt_does_not_direct_model_to_emit_unreadable_notice() -> None:
+    assert "可读取内容有限" not in SYSTEM_PROMPT
 
 
 def test_summary_evenly_limits_multiple_successful_results(tmp_path: Path) -> None:
