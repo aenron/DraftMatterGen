@@ -4,6 +4,7 @@ from pathlib import Path
 
 from fastapi import UploadFile
 
+from app.api.schemas import DocumentSummaryItem
 from app.core.config import Settings
 from app.services.document_service import ParsedDocument
 from app.services.document_summary_service import DocumentSummaryService, SUMMARY_STAMP_NOTE
@@ -21,10 +22,21 @@ class FakeDocumentService:
 class FakeLLMClient:
     def __init__(self) -> None:
         self.inputs: list[str] = []
+        self.max_chars: list[int | None] = []
 
-    async def summarize_document(self, document_text: str) -> str:
+    async def summarize_document(self, document_text: str, *, max_chars: int | None = None) -> str:
         self.inputs.append(document_text)
+        self.max_chars.append(max_chars)
         return f"摘要{len(self.inputs)}"
+
+
+class MultipleFakeDocumentService:
+    def __init__(self, parsed_documents: list[ParsedDocument]) -> None:
+        self.parsed_documents = iter(parsed_documents)
+
+    async def extract_upload_document(self, upload):
+        await upload.close()
+        return next(self.parsed_documents)
 
 
 def make_settings(tmp_path: Path) -> Settings:
@@ -96,18 +108,55 @@ def test_long_document_is_chunked_and_merged(tmp_path: Path) -> None:
     result = asyncio.run(service.summarize_uploads([upload]))[0]
 
     assert result.status == "succeeded"
-    assert result.summary == f"摘要4{SUMMARY_STAMP_NOTE}"
+    assert result.summary == f"摘要4。{SUMMARY_STAMP_NOTE}"
     assert len(llm.inputs) == 4
     assert "正文切片摘要" in llm.inputs[-1]
+    assert llm.max_chars == [None, None, None, 40]
 
 
-def test_summary_appends_stamp_note_once(tmp_path: Path) -> None:
+def test_summary_preserves_overlong_model_output(tmp_path: Path) -> None:
     service = DocumentSummaryService(make_settings(tmp_path))
+    results = [DocumentSummaryItem(filename="sample.txt", status="succeeded", summary="甲" * 100)]
+    service._format_summary_results(results)
 
-    assert service._append_stamp_note("摘要正文") == f"摘要正文{SUMMARY_STAMP_NOTE}"
-    assert service._append_stamp_note(f"摘要正文{SUMMARY_STAMP_NOTE}") == (
-        f"摘要正文{SUMMARY_STAMP_NOTE}"
+    assert results[0].summary == "甲" * 100 + f"。{SUMMARY_STAMP_NOTE}"
+    assert len(results[0].summary) == 108
+
+
+def test_summary_evenly_limits_multiple_successful_results(tmp_path: Path) -> None:
+    service = DocumentSummaryService(make_settings(tmp_path))
+    results = [
+        DocumentSummaryItem(filename=f"sample-{index}.txt", status="succeeded", summary="甲" * 100)
+        for index in range(3)
+    ]
+
+    service._format_summary_results(results)
+
+    assert [len(item.summary or "") for item in results] == [101, 101, 108]
+    assert results[0].summary.endswith("；")
+    assert results[1].summary.endswith("；")
+    assert results[2].summary.endswith(f"。{SUMMARY_STAMP_NOTE}")
+
+
+def test_summary_passes_precomputed_multiple_file_limits_to_llm(tmp_path: Path) -> None:
+    parsed_documents = [
+        ParsedDocument(text=f"文档{index}", filename=f"sample-{index}.txt", extension="txt")
+        for index in range(2)
+    ]
+    llm = FakeLLMClient()
+    service = DocumentSummaryService(
+        make_settings(tmp_path), MultipleFakeDocumentService(parsed_documents), llm
     )
+    uploads = [
+        UploadFile(filename=f"sample-{index}.txt", file=BytesIO(b"content")) for index in range(2)
+    ]
+
+    results = asyncio.run(service.summarize_uploads(uploads))
+
+    assert llm.max_chars == [44, 45]
+    assert all(len(item.summary or "") <= 45 for item in results)
+    assert results[0].summary == "摘要1；"
+    assert results[1].summary == f"摘要2。{SUMMARY_STAMP_NOTE}"
 
 
 def test_pdf_opening_uses_page_boundaries(tmp_path: Path) -> None:

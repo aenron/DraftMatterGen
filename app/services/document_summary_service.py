@@ -31,6 +31,7 @@ SUMMARY_KEYWORDS = (
 
 SUMMARY_PARSEABLE_EXTENSIONS = {"doc", "docx", "pdf", "txt"}
 SUMMARY_STAMP_NOTE = "文件需要盖章。"
+SUMMARY_LAST_ITEM_SUFFIX = f"。{SUMMARY_STAMP_NOTE}"
 
 
 class DocumentSummaryService:
@@ -59,60 +60,100 @@ class DocumentSummaryService:
             )
 
         results: list[DocumentSummaryItem] = []
+        candidates: list[tuple[int, ParsedDocument]] = []
         for upload in uploads:
-            results.append(await self._summarize_upload(upload))
+            result, parsed = await self._prepare_upload(upload)
+            results.append(result)
+            if parsed is not None:
+                candidates.append((len(results) - 1, parsed))
+
+        for candidate_index, (result_index, parsed) in enumerate(candidates):
+            try:
+                summary = await self._summarize_document(
+                    parsed,
+                    max_chars=self._summary_body_char_limit(len(candidates), candidate_index),
+                )
+                logger.debug(
+                    "document_summary_completed filename={} source_chars={} summary_chars={}",
+                    parsed.filename,
+                    len(parsed.text),
+                    len(summary),
+                )
+                results[result_index] = DocumentSummaryItem(
+                    filename=parsed.filename,
+                    status="succeeded",
+                    summary=summary,
+                    chars_processed=len(parsed.text),
+                )
+            except ServiceError as exc:
+                results[result_index] = DocumentSummaryItem(
+                    filename=parsed.filename, status="failed", reason=exc.message
+                )
+            except Exception as exc:
+                logger.exception("document_summary_failed filename={}", parsed.filename)
+                results[result_index] = DocumentSummaryItem(
+                    filename=parsed.filename, status="failed", reason=str(exc)
+                )
+
+        self._format_summary_results(results)
         return results
 
-    async def _summarize_upload(self, upload: UploadFile) -> DocumentSummaryItem:
+    async def _prepare_upload(
+        self, upload: UploadFile
+    ) -> tuple[DocumentSummaryItem, ParsedDocument | None]:
         filename = Path(upload.filename or "").name or "unknown"
         suffix = Path(filename).suffix.lower().lstrip(".")
         if suffix and suffix not in self.settings.summary_allowed_extension_set:
             await upload.close()
-            return DocumentSummaryItem(
-                filename=filename,
-                status="failed",
-                reason=f"不支持的文件类型: .{suffix}",
+            return (
+                DocumentSummaryItem(
+                    filename=filename,
+                    status="failed",
+                    reason=f"不支持的文件类型: .{suffix}",
+                ),
+                None,
             )
         if suffix == "xlsx":
             await upload.close()
-            return DocumentSummaryItem(
-                filename=filename,
-                status="ignored",
-                reason="xlsx 文件已按规则忽略",
+            return (
+                DocumentSummaryItem(
+                    filename=filename,
+                    status="ignored",
+                    reason="xlsx 文件已按规则忽略",
+                ),
+                None,
             )
         if suffix and suffix not in SUMMARY_PARSEABLE_EXTENSIONS:
             await upload.close()
-            return DocumentSummaryItem(
-                filename=filename,
-                status="failed",
-                reason=f"不支持的文件类型: .{suffix}",
+            return (
+                DocumentSummaryItem(
+                    filename=filename,
+                    status="failed",
+                    reason=f"不支持的文件类型: .{suffix}",
+                ),
+                None,
             )
 
         try:
             parsed = await self.document_service.extract_upload_document(upload)
-            summary = self._append_stamp_note(await self._summarize_document(parsed))
-            logger.debug(
-                "document_summary_completed filename={} source_chars={} summary_chars={}",
-                parsed.filename,
-                len(parsed.text),
-                len(summary),
-            )
-            return DocumentSummaryItem(
-                filename=parsed.filename,
-                status="succeeded",
-                summary=summary,
-                chars_processed=len(parsed.text),
+            return (
+                DocumentSummaryItem(
+                    filename=parsed.filename,
+                    status="succeeded",
+                    chars_processed=len(parsed.text),
+                ),
+                parsed,
             )
         except ServiceError as exc:
-            return DocumentSummaryItem(filename=filename, status="failed", reason=exc.message)
+            return DocumentSummaryItem(filename=filename, status="failed", reason=exc.message), None
         except Exception as exc:
-            logger.exception("document_summary_failed filename={}", filename)
-            return DocumentSummaryItem(filename=filename, status="failed", reason=str(exc))
+            logger.exception("document_summary_parse_failed filename={}", filename)
+            return DocumentSummaryItem(filename=filename, status="failed", reason=str(exc)), None
 
-    async def _summarize_document(self, parsed: ParsedDocument) -> str:
+    async def _summarize_document(self, parsed: ParsedDocument, *, max_chars: int) -> str:
         text = parsed.text
         if len(text) <= self.settings.summary_chunk_max_chars:
-            return await self.llm_client.summarize_document(text)
+            return await self.llm_client.summarize_document(text, max_chars=max_chars)
 
         toc = self._extract_toc_candidate(parsed)
         opening = self._extract_opening(parsed)
@@ -129,7 +170,7 @@ class DocumentSummaryService:
             opening=opening,
             chunk_summaries=chunk_summaries,
         )
-        return await self.llm_client.summarize_document(final_input)
+        return await self.llm_client.summarize_document(final_input, max_chars=max_chars)
 
     def _extract_opening(self, parsed: ParsedDocument) -> str:
         if parsed.pages:
@@ -229,9 +270,24 @@ class DocumentSummaryService:
             )
         return "\n\n".join(parts)
 
-    @staticmethod
-    def _append_stamp_note(summary: str) -> str:
-        summary = summary.strip()
-        if summary.endswith(SUMMARY_STAMP_NOTE):
-            return summary
-        return f"{summary}{SUMMARY_STAMP_NOTE}"
+    def _format_summary_results(self, results: list[DocumentSummaryItem]) -> None:
+        successful = [
+            item for item in results if item.status == "succeeded" and item.summary is not None
+        ]
+        if not successful:
+            return
+
+        for index, item in enumerate(successful):
+            suffix = SUMMARY_LAST_ITEM_SUFFIX if index == len(successful) - 1 else "；"
+            item.summary = f"{item.summary.strip()}{suffix}"
+
+    def _summary_item_char_limit(self, successful_count: int) -> int:
+        if successful_count == 1:
+            return self.settings.summary_single_file_max_chars
+        return self.settings.summary_multiple_total_chars // successful_count
+
+    def _summary_body_char_limit(self, candidate_count: int, candidate_index: int) -> int:
+        item_limit = self._summary_item_char_limit(candidate_count)
+        if candidate_index == candidate_count - 1:
+            return item_limit
+        return max(0, item_limit - len("；"))

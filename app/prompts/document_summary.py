@@ -6,10 +6,18 @@ SYSTEM_PROMPT = """你是严谨的中文文档摘要助手。请根据输入材�
 2. 优先保留项目名称、申报单位、研究目标、建设内容、技术路线、进度安排等明确出现的信息。
 3. 不得编造原文中不存在的事实、主体、金额、结论或评价。
 4. 如果可读取内容有限，请在摘要中说明“可读取内容有限”。
-5. 通常输出100至150个汉字，最多不超过180个汉字，使用一个自然段。
+5. 使用一个自然段，并严格遵守用户消息给出的摘要正文长度上限。
 6. 只返回JSON对象，格式为 {"summary": "摘要正文"}，不要解释。
 """
 
 
-def build_user_prompt(document_text: str) -> str:
-    return f"请根据以下文档内容生成主要内容摘要：\n\n<document>\n{document_text}\n</document>"
+def build_user_prompt(document_text: str, *, max_chars: int | None = None) -> str:
+    limit_instruction = (
+        f"摘要正文不得超过{max_chars}个字符，不要添加句号、分号或“文件需要盖章。”。\n"
+        if max_chars is not None
+        else ""
+    )
+    return (
+        f"{limit_instruction}请根据以下文档内容生成主要内容摘要："
+        f"\n\n<document>\n{document_text}\n</document>"
+    )

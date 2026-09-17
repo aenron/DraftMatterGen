@@ -58,6 +58,8 @@ ALLOWED_EXTENSIONS=docx,doc,txt
 
 # 文档摘要接口；xlsx 允许时会按规则忽略，不进入摘要处理
 SUMMARY_ALLOWED_EXTENSIONS=docx,doc,pdf,txt,xlsx
+SUMMARY_SINGLE_FILE_MAX_CHARS=40
+SUMMARY_MULTIPLE_TOTAL_CHARS=90
 ```
 
 日志配置：

@@ -161,6 +161,21 @@ def test_summary_uses_summary_specific_token_limit() -> None:
     assert asyncio.run(client.summarize_document("文档正文")) == "短摘要"
 
 
+def test_summary_passes_character_limit_to_prompt() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        assert "摘要正文不得超过32个字符" in body["messages"][1]["content"]
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": '{"summary":"短摘要"}'}}]},
+        )
+
+    settings = Settings(LLM_BASE_URL="https://llm.test/v1", LLM_MODEL="test-model")
+    client = LLMClient(settings, transport=httpx.MockTransport(handler))
+
+    assert asyncio.run(client.summarize_document("文档正文", max_chars=32)) == "短摘要"
+
+
 def test_retry_races_primary_and_backup_and_uses_first_success() -> None:
     primary_calls = 0
     backup_calls = 0

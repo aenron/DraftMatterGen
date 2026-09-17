@@ -64,7 +64,13 @@ class Settings(BaseSettings):
         3600, ge=60, validation_alias="ASYNC_JOB_TTL_SECONDS"
     )
     async_data_dir: Path = Field(Path("./data"), validation_alias="ASYNC_DATA_DIR")
-    summary_max_files: int = Field(10, gt=0, le=100, validation_alias="SUMMARY_MAX_FILES")
+    summary_max_files: int = Field(10, gt=0, le=10, validation_alias="SUMMARY_MAX_FILES")
+    summary_single_file_max_chars: int = Field(
+        40, gt=0, validation_alias="SUMMARY_SINGLE_FILE_MAX_CHARS"
+    )
+    summary_multiple_total_chars: int = Field(
+        90, gt=0, validation_alias="SUMMARY_MULTIPLE_TOTAL_CHARS"
+    )
     summary_initial_chars: int = Field(
         20_000, gt=1000, validation_alias="SUMMARY_INITIAL_CHARS"
     )

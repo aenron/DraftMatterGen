@@ -70,10 +70,10 @@ class LLMClient:
             raise ServiceError(502, "LLM_INVALID_RESPONSE", "LLM 返回内容格式错误")
         return reason.strip()
 
-    async def summarize_document(self, document_text: str) -> str:
+    async def summarize_document(self, document_text: str, *, max_chars: int | None = None) -> str:
         payload = await self._chat_json(
             SUMMARY_SYSTEM_PROMPT,
-            build_summary_user_prompt(document_text),
+            build_summary_user_prompt(document_text, max_chars=max_chars),
             input_chars=len(document_text),
             max_tokens=self.settings.summary_llm_max_tokens,
         )
