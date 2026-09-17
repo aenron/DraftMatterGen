@@ -72,7 +72,7 @@ class Settings(BaseSettings):
         90, gt=0, validation_alias="SUMMARY_MULTIPLE_TOTAL_CHARS"
     )
     summary_initial_chars: int = Field(
-        20_000, gt=1000, validation_alias="SUMMARY_INITIAL_CHARS"
+        4_000, gt=1000, validation_alias="SUMMARY_INITIAL_CHARS"
     )
     summary_toc_scan_chars: int = Field(
         30_000, gt=1000, validation_alias="SUMMARY_TOC_SCAN_CHARS"
@@ -81,9 +81,9 @@ class Settings(BaseSettings):
         8_000, gt=100, validation_alias="SUMMARY_TOC_MAX_CHARS"
     )
     summary_chunk_max_chars: int = Field(
-        12_000, gt=1000, validation_alias="SUMMARY_CHUNK_MAX_CHARS"
+        4_000, gt=1000, validation_alias="SUMMARY_CHUNK_MAX_CHARS"
     )
-    summary_max_chunks: int = Field(4, gt=0, le=50, validation_alias="SUMMARY_MAX_CHUNKS")
+    summary_max_chunks: int = Field(1, gt=0, le=50, validation_alias="SUMMARY_MAX_CHUNKS")
     summary_chunk_delay_seconds: float = Field(
         0.2, ge=0, le=10, validation_alias="SUMMARY_CHUNK_DELAY_SECONDS"
     )

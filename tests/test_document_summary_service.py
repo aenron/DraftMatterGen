@@ -46,6 +46,8 @@ def make_settings(tmp_path: Path) -> Settings:
         LLM_BASE_URL="http://llm.test/v1",
         LLM_MODEL="test-model",
         TEMP_DIR=tmp_path,
+        SUMMARY_INITIAL_CHARS=4000,
+        SUMMARY_CHUNK_MAX_CHARS=4000,
         SUMMARY_CHUNK_DELAY_SECONDS=0,
     )
 
@@ -92,7 +94,7 @@ def test_summary_uses_summary_allowed_extensions_instead_of_global_allowed_exten
     assert "pdf" not in settings.allowed_extension_set
 
 
-def test_long_document_is_chunked_and_merged(tmp_path: Path) -> None:
+def test_long_document_uses_opening_and_toc_in_one_model_call(tmp_path: Path) -> None:
     text = "\n".join(
         [
             "目录\n一、项目背景\n二、研究目标\n三、建设内容",
@@ -109,10 +111,25 @@ def test_long_document_is_chunked_and_merged(tmp_path: Path) -> None:
     result = asyncio.run(service.summarize_uploads([upload]))[0]
 
     assert result.status == "succeeded"
-    assert result.summary == f"摘要4。{SUMMARY_STAMP_NOTE}"
-    assert len(llm.inputs) == 4
-    assert "正文切片摘要" in llm.inputs[-1]
-    assert llm.max_chars == [None, None, None, 40]
+    assert result.summary == f"摘要1。{SUMMARY_STAMP_NOTE}"
+    assert len(llm.inputs) == 1
+    assert "疑似目录" in llm.inputs[0]
+    assert "文档开头内容" in llm.inputs[0]
+    assert llm.max_chars == [40]
+
+
+def test_long_document_without_toc_uses_only_first_4000_characters(tmp_path: Path) -> None:
+    parsed = ParsedDocument(text="甲" * 5000, filename="材料.txt", extension="txt")
+    llm = FakeLLMClient()
+    service = DocumentSummaryService(make_settings(tmp_path), FakeDocumentService(parsed), llm)
+    upload = UploadFile(filename="材料.txt", file=BytesIO(b"content"))
+
+    result = asyncio.run(service.summarize_uploads([upload]))[0]
+
+    assert result.status == "succeeded"
+    assert len(llm.inputs) == 1
+    assert "疑似目录" not in llm.inputs[0]
+    assert llm.inputs[0] == f"文档开头内容：\n{'甲' * 4000}"
 
 
 def test_summary_preserves_overlong_model_output(tmp_path: Path) -> None:
