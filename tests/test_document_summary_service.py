@@ -6,6 +6,7 @@ from fastapi import UploadFile
 
 from app.api.schemas import DocumentSummaryItem
 from app.core.config import Settings
+from app.prompts.document_summary import SYSTEM_PROMPT
 from app.services.document_service import ParsedDocument
 from app.services.document_summary_service import DocumentSummaryService, SUMMARY_STAMP_NOTE
 
@@ -121,6 +122,25 @@ def test_summary_preserves_overlong_model_output(tmp_path: Path) -> None:
 
     assert results[0].summary == "甲" * 100 + f"。{SUMMARY_STAMP_NOTE}"
     assert len(results[0].summary) == 108
+
+
+def test_summary_removes_unreadable_notice_and_terminal_punctuation(tmp_path: Path) -> None:
+    service = DocumentSummaryService(make_settings(tmp_path))
+    results = [
+        DocumentSummaryItem(
+            filename="sample.txt",
+            status="succeeded",
+            summary="可读取内容有限。正文内容。",
+        )
+    ]
+
+    service._format_summary_results(results)
+
+    assert results[0].summary == f"正文内容。{SUMMARY_STAMP_NOTE}"
+
+
+def test_summary_prompt_forbids_unreadable_notice() -> None:
+    assert "不得输出“可读取内容有限”" in SYSTEM_PROMPT
 
 
 def test_summary_evenly_limits_multiple_successful_results(tmp_path: Path) -> None:

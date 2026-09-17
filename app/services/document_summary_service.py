@@ -32,6 +32,7 @@ SUMMARY_KEYWORDS = (
 SUMMARY_PARSEABLE_EXTENSIONS = {"doc", "docx", "pdf", "txt"}
 SUMMARY_STAMP_NOTE = "文件需要盖章。"
 SUMMARY_LAST_ITEM_SUFFIX = f"。{SUMMARY_STAMP_NOTE}"
+SUMMARY_UNREADABLE_NOTICE = "可读取内容有限"
 
 
 class DocumentSummaryService:
@@ -279,7 +280,10 @@ class DocumentSummaryService:
 
         for index, item in enumerate(successful):
             suffix = SUMMARY_LAST_ITEM_SUFFIX if index == len(successful) - 1 else "；"
-            item.summary = f"{item.summary.strip()}{suffix}"
+            body = re.sub(
+                rf"{re.escape(SUMMARY_UNREADABLE_NOTICE)}[。；;，,、]*", "", item.summary.strip()
+            )
+            item.summary = f"{body.rstrip('。；;')}{suffix}"
 
     def _summary_item_char_limit(self, successful_count: int) -> int:
         if successful_count == 1:
