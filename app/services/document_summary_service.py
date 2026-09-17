@@ -50,6 +50,8 @@ class DocumentSummaryService:
             if parsed is not None:
                 candidates.append((len(results) - 1, parsed))
 
+        self._log_received_documents(candidates)
+
         for candidate_index, (result_index, parsed) in enumerate(candidates):
             try:
                 summary = await self._summarize_document(
@@ -118,7 +120,7 @@ class DocumentSummaryService:
             )
 
         try:
-            parsed = await self.document_service.extract_upload_document(upload)
+            parsed = await self.document_service.extract_upload_document(upload, log_received=False)
             return (
                 DocumentSummaryItem(
                     filename=parsed.filename,
@@ -132,6 +134,20 @@ class DocumentSummaryService:
         except Exception as exc:
             logger.exception("document_summary_parse_failed filename={}", filename)
             return DocumentSummaryItem(filename=filename, status="failed", reason=str(exc)), None
+
+    def _log_received_documents(self, candidates: list[tuple[int, ParsedDocument]]) -> None:
+        if not candidates:
+            return
+        details = "；".join(
+            "文件名={}，类型={}，大小={}，文本长度={}字符".format(
+                parsed.filename,
+                parsed.extension,
+                DocumentService._format_size(parsed.size_bytes or 0),
+                len(parsed.text),
+            )
+            for _, parsed in candidates
+        )
+        logger.info("📥 文件接收完成 | 文件数={} | 文件详情={}", len(candidates), details)
 
     async def _summarize_document(self, parsed: ParsedDocument, *, max_chars: int) -> str:
         text = parsed.text

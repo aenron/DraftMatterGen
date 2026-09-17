@@ -15,7 +15,7 @@ class FakeDocumentService:
     def __init__(self, parsed: ParsedDocument) -> None:
         self.parsed = parsed
 
-    async def extract_upload_document(self, upload):
+    async def extract_upload_document(self, upload, *, log_received=True):
         await upload.close()
         return self.parsed
 
@@ -35,7 +35,7 @@ class MultipleFakeDocumentService:
     def __init__(self, parsed_documents: list[ParsedDocument]) -> None:
         self.parsed_documents = iter(parsed_documents)
 
-    async def extract_upload_document(self, upload):
+    async def extract_upload_document(self, upload, *, log_received=True):
         await upload.close()
         return next(self.parsed_documents)
 

@@ -261,7 +261,6 @@ class LLMClient:
                 attempt,
             )
             response = await client.post(endpoint.url, headers=headers, json=payload)
-        self._log_http_response(response, endpoint, attempt, started_at)
         if response.status_code == 429 or response.status_code >= 500:
             self._log_http_error_response(response, endpoint, attempt)
             response.raise_for_status()
@@ -277,7 +276,6 @@ class LLMClient:
         except json.JSONDecodeError as exc:
             self._log_non_json_response(response, endpoint, exc, attempt, started_at)
             raise
-        self._log_message_content(response_payload, endpoint, attempt)
         try:
             result = self._decode_response_json(response_payload)
         except (ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
@@ -285,13 +283,7 @@ class LLMClient:
                 response_payload, exc, attempt, endpoint.role, endpoint.model
             )
             raise
-        logger.info(
-            "✅ 模型响应解析成功 | 类型={} | 模型={} | 第{}次 | 结果长度={}",
-            endpoint.role,
-            endpoint.model,
-            attempt,
-            len(str(result)),
-        )
+        self._log_successful_response(response, response_payload, endpoint, attempt, started_at, result)
         return result
 
     @staticmethod
@@ -400,30 +392,14 @@ class LLMClient:
             self._response_preview(response),
         )
 
-    def _log_http_response(
+    def _log_successful_response(
         self,
         response: httpx.Response,
-        endpoint: LLMEndpoint,
-        attempt: int,
-        started_at: float,
-    ) -> None:
-        logger.info(
-            "🤖 模型HTTP响应 | 类型={} | 模型={} | 第{}次 | 状态={} | Content-Type={} | "
-            "body_bytes={} | 耗时={:.2f}s",
-            endpoint.role,
-            endpoint.model,
-            attempt,
-            response.status_code,
-            response.headers.get("content-type", ""),
-            len(response.content),
-            time.perf_counter() - started_at,
-        )
-
-    def _log_message_content(
-        self,
         payload: dict[str, Any],
         endpoint: LLMEndpoint,
         attempt: int,
+        started_at: float,
+        result: dict[str, Any],
     ) -> None:
         content: Any = None
         try:
@@ -431,10 +407,16 @@ class LLMClient:
         except (KeyError, IndexError, TypeError):
             pass
         logger.info(
-            "💬 模型消息内容 | 类型={} | 模型={} | 第{}次 | content_type={} | 内容首尾={}",
+            "🤖 模型响应完成 | 类型={} | 模型={} | 第{}次 | 状态={} | Content-Type={} | "
+            "body_bytes={} | 耗时={:.2f}s | 结果长度={} | content_type={} | 内容首尾={}",
             endpoint.role,
             endpoint.model,
             attempt,
+            response.status_code,
+            response.headers.get("content-type", ""),
+            len(response.content),
+            time.perf_counter() - started_at,
+            len(str(result)),
             type(content).__name__,
             self._text_head_tail(content) if isinstance(content, str) else "<unavailable>",
         )

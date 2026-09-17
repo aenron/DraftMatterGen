@@ -23,6 +23,7 @@ class ParsedDocument:
     filename: str
     extension: str
     pages: list[str] | None = None
+    size_bytes: int | None = None
 
 
 class DocumentService:
@@ -43,7 +44,9 @@ class DocumentService:
         parsed = await self.extract_upload_document(upload)
         return parsed.text, parsed.filename
 
-    async def extract_upload_document(self, upload: UploadFile) -> ParsedDocument:
+    async def extract_upload_document(
+        self, upload: UploadFile, *, log_received: bool = True
+    ) -> ParsedDocument:
         filename = Path(upload.filename or "").name
         suffix = Path(filename).suffix.lower().lstrip(".")
         logger.debug("document_received filename={} extension={}", filename or "unknown", suffix or "none")
@@ -79,14 +82,21 @@ class DocumentService:
                 pages = [self._clean_text(page) for page in pages]
             if not text:
                 raise ServiceError(422, "NO_READABLE_TEXT", "文档中未提取到可读文字")
-            logger.info(
-                "📥 文件接收完成 | 文件名={} | 类型={} | 大小={} | 文本长度={}字符",
-                filename,
-                suffix,
-                self._format_size(size_bytes),
-                len(text),
+            if log_received:
+                logger.info(
+                    "📥 文件接收完成 | 文件名={} | 类型={} | 大小={} | 文本长度={}字符",
+                    filename,
+                    suffix,
+                    self._format_size(size_bytes),
+                    len(text),
+                )
+            return ParsedDocument(
+                text=text,
+                filename=filename,
+                extension=suffix,
+                pages=pages,
+                size_bytes=size_bytes,
             )
-            return ParsedDocument(text=text, filename=filename, extension=suffix, pages=pages)
         finally:
             await upload.close()
             await asyncio.to_thread(shutil.rmtree, work_dir, True)

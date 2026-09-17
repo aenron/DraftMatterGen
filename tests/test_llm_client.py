@@ -96,13 +96,10 @@ def test_successful_http_response_logs_content_at_info_level() -> None:
         logger.remove(sink_id)
 
     log_text = "".join(messages)
-    assert "模型HTTP响应" in log_text
+    assert log_text.count("模型响应完成") == 1
     assert "状态=200" in log_text
-    assert "模型消息内容" in log_text
     assert "内容首尾=<full>" in log_text
     assert "拟办理相关事项。" in log_text
-    http_log = next(line for line in messages if "模型HTTP响应" in line)
-    assert "拟办理相关事项。" not in http_log
 
 
 def test_llm_max_concurrency_is_respected() -> None:
